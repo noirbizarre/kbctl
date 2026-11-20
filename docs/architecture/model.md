@@ -1,7 +1,8 @@
 # Implemented device and keyboard model
 
 The private [`src/model/`](../../src/model/mod.rs) modules implement the in-memory domain layer for
-[issue #5](https://github.com/noirbizarre/kbctl/issues/5). They perform no enumeration, transport I/O or firmware queries.
+[issue #5](https://github.com/noirbizarre/kbctl/issues/5), extended with [capability reports and cache](capabilities.md)
+for issue #6. They perform no enumeration, transport I/O or firmware queries.
 The CLI does not consume the model yet. No identifiers or topology are persisted to disk.
 
 ## Records and ownership
@@ -100,7 +101,8 @@ Renaming a keyboard or physical unit changes neither runtime identity nor hardwa
 `TransportKind` currently distinguishes HID and serial channels. `ConnectionState` is independently unvalidated, ready
 with an `AttachmentGeneration`, or unavailable with a typed reason such as permission denial, busy channel,
 disconnection, suspend or protocol failure. Ready means the adapter validated the channel, not that every capability
-works or that normal typing is healthy. Protocol support and observation quality remain separate future concerns.
+works or that normal typing is healthy. Capability support is tracked separately from channel availability;
+observed values and observation quality remain future work.
 
 `revalidate_endpoint` issues a fresh generation, even for a previously ready endpoint. `invalidate_endpoint` makes
 all work from the previous ready attachment stale without removing physical hardware. Restored access requires
@@ -116,6 +118,17 @@ standalone check is not a concurrency transaction or a per-operation cancellatio
 
 Polling, I/O cancellation, retries, access recovery, suspend orchestration, discovery reconciliation, committed snapshots
 and event delivery remain application-layer work described by [ADR 0004](adrs/0004-state-and-events.md).
+
+## Capability evidence
+
+The implemented [capability model](capabilities.md) stores sparse operation-level reports explicitly scoped to a
+keyboard or component. Unknown support is distinct from unsupported, and reading support does not imply writing.
+Version/constraint metadata is opaque to the core; reporters resolve their own firmware/protocol restrictions.
+
+`Topology` owns accepted reports and pending refreshes. Its mutation methods enforce cache invalidation for structural
+or attachment/context changes. Unique refresh tokens reject superseded results even on the same attachment.
+Permission/busy access loss preserves established support while separately exposing source unavailability; successful
+revalidation requires rediscovery. No capability history, on-disk storage or automatic feature aggregation is added.
 
 ## Representative tests
 

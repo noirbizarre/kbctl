@@ -51,7 +51,8 @@ runtime_id!(
     EndpointId,
     ComponentId,
     AttachmentGeneration,
-    MembershipGeneration
+    MembershipGeneration,
+    CapabilityRefreshId
 );
 
 /// Group identifiers describe association, never individual hardware identity.

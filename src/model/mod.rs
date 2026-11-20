@@ -8,6 +8,7 @@
 // compiled in the binary now without manufacturing CLI behavior to use it.
 #![allow(dead_code)]
 
+pub(crate) mod capability;
 pub(crate) mod connection;
 pub(crate) mod identity;
 pub(crate) mod topology;
@@ -113,6 +114,41 @@ pub(crate) enum ModelError {
     StaleOperation {
         endpoint: EndpointId,
         component: ComponentId,
+    },
+    #[error("capability operation {0:?} is repeated in one report")]
+    #[diagnostic(
+        code(kbctl::model::duplicate_capability),
+        help("Supply one support entry per operation in the replacement report.")
+    )]
+    DuplicateCapability(capability::CapabilityOperation),
+    #[error("{kind:?} version namespace `{namespace}` is repeated in one report")]
+    #[diagnostic(
+        code(kbctl::model::duplicate_capability_version),
+        help("Reconcile version facts before publishing the capability report.")
+    )]
+    DuplicateCapabilityVersion {
+        kind: capability::VersionKind,
+        namespace: String,
+    },
+    #[error("endpoint {endpoint} belongs to a different keyboard from capability scope {scope:?}")]
+    #[diagnostic(
+        code(kbctl::model::capability_source_mismatch),
+        help("Use a ready source endpoint belonging to the target keyboard.")
+    )]
+    CapabilitySourceMismatch {
+        endpoint: EndpointId,
+        scope: capability::CapabilityScope,
+    },
+    #[error("capability refresh {refresh} for {scope:?} is no longer current")]
+    #[diagnostic(
+        code(kbctl::model::stale_capability_refresh),
+        help(
+            "Discard the result and begin a new refresh after reconciling the target and source."
+        )
+    )]
+    StaleCapabilityRefresh {
+        refresh: identity::CapabilityRefreshId,
+        scope: capability::CapabilityScope,
     },
 }
 

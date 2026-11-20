@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
     ModelError, Result,
+    capability::CapabilityCache,
     connection::{
         Connection, ConnectionState, EndpointLocator, OperationToken, TransportKind,
         UnavailableReason,
@@ -282,6 +283,7 @@ pub(crate) enum IdentityCandidates {
 /// owners of the same runtime instances. Snapshots will be a separate concern.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct Topology {
+    pub(super) capabilities: CapabilityCache,
     keyboards: BTreeMap<KeyboardId, LogicalKeyboard>,
     physical: BTreeMap<PhysicalDeviceId, PhysicalDevice>,
     interfaces: BTreeMap<InterfaceId, Interface>,
@@ -386,6 +388,7 @@ impl Topology {
         }
         // No fallible work follows: allocation exhaustion must not leave a
         // partially published physical device or an empty keyboard shell.
+        self.capabilities.invalidate_keyboard(keyboard_id);
         if keyboard.is_none() {
             self.keyboards.insert(
                 keyboard_id,
@@ -450,6 +453,8 @@ impl Topology {
         // Track reassociation even if a unit later returns to its old keyboard:
         // comparing only current keyboard IDs would revive stale operation tokens.
         let membership = MembershipGeneration::allocate()?;
+        self.capabilities.invalidate_keyboard(previous);
+        self.capabilities.invalidate_keyboard(keyboard);
         let device = self
             .physical
             .get_mut(&physical)
@@ -485,6 +490,7 @@ impl Topology {
         }
         // Fresh IDs and an existing parent make cycles impossible on insertion.
         let id = ComponentId::allocate()?;
+        self.capabilities.invalidate_keyboard(keyboard);
         self.components.insert(
             id,
             Component {
@@ -500,7 +506,7 @@ impl Topology {
     }
 
     pub(crate) fn remove_component(&mut self, id: ComponentId) -> Result<()> {
-        self.component(id)?;
+        let keyboard = self.component(id)?.keyboard;
         let mut removed = BTreeSet::from([id]);
         loop {
             let descendants: Vec<_> = self
@@ -515,12 +521,14 @@ impl Topology {
                 break;
             }
         }
+        self.capabilities.invalidate_keyboard(keyboard);
         self.components.retain(|id, _| !removed.contains(id));
         Ok(())
     }
 
     pub(crate) fn retire_physical_device(&mut self, physical: PhysicalDeviceId) -> Result<()> {
         let keyboard = self.physical_device(physical)?.keyboard;
+        self.capabilities.invalidate_keyboard(keyboard);
         self.components.retain(|_, c| c.physical != physical);
         self.endpoints.retain(|_, e| e.physical != physical);
         self.interfaces.retain(|_, i| i.physical != physical);
@@ -573,11 +581,15 @@ impl Topology {
     }
 
     pub(crate) fn revalidate_endpoint(&mut self, id: EndpointId) -> Result<AttachmentGeneration> {
-        self.endpoints
+        let keyboard = self.physical_device(self.endpoint(id)?.physical)?.keyboard;
+        let generation = self
+            .endpoints
             .get_mut(&id)
             .ok_or(ModelError::UnknownEndpoint(id))?
             .connection
-            .revalidate()
+            .revalidate()?;
+        self.capabilities.invalidate_keyboard(keyboard);
+        Ok(generation)
     }
 
     pub(crate) fn invalidate_endpoint(
@@ -585,11 +597,22 @@ impl Topology {
         id: EndpointId,
         reason: UnavailableReason,
     ) -> Result<()> {
+        let keyboard = self.physical_device(self.endpoint(id)?.physical)?.keyboard;
         self.endpoints
             .get_mut(&id)
             .ok_or(ModelError::UnknownEndpoint(id))?
             .connection
             .invalidate(reason);
+        match reason {
+            // Access failure alone is not evidence that supported operations have
+            // changed. Revalidation will invalidate this retained context later.
+            UnavailableReason::PermissionDenied | UnavailableReason::Busy => {
+                self.capabilities.cancel_pending_from(id)
+            }
+            UnavailableReason::Disconnected
+            | UnavailableReason::Suspended
+            | UnavailableReason::ProtocolFailure => self.capabilities.invalidate_keyboard(keyboard),
+        }
         Ok(())
     }
 

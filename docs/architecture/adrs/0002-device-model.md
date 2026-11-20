@@ -1,7 +1,7 @@
 # ADR 0002: Separate topology, transport, protocol and capabilities
 
-Status: Accepted design; topology, identity and connection primitives implemented for issue #5.
-Capabilities, protocol backends and application lifecycle integration remain pending.
+Status: Accepted design; topology, identity and connection primitives implemented for issue #5, and capability
+metadata/cache for issue #6. Protocol backends and application lifecycle integration remain pending.
 
 ## Context
 
@@ -73,6 +73,16 @@ knows about communication, not a hardware self-test or whether normal typing wor
 Adapters expose only implemented, supported capability interfaces. Unknown/unsupported entries and unavailability
 reasons remain discoverable in base metadata; temporary failures preserve supported interfaces and change status.
 Future controls require explicit typed capabilities and shared validation; there is no generic vendor-command escape.
+
+The implemented [capability model](../capabilities.md) reports support per typed operation, with read-only/writable
+classification derived from the operation. Sparse reports are explicitly scoped to a keyboard or component; they
+do not inherit or union. Reporters resolve their own firmware/protocol constraints and supply namespaced opaque
+version/constraint metadata. The generic core does not evaluate SemVer or assume a universal version ordering.
+
+The topology-owned cache fully replaces a scope's report on refresh and rejects stale results using unique refresh
+tokens. Structural, attachment or known context changes conservatively invalidate the keyboard's evidence. Temporary
+permission/busy failures preserve established support while exposing source unavailability; revalidation requires
+rediscovery. This cache stores support evidence, not observed state or executable authorization.
 
 ## Alternatives and trade-offs
 

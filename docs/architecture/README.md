@@ -7,6 +7,8 @@ can safely report. Firmware, battery and active runtime state are optional obser
 **Implementation status:** these decisions define the target architecture for [issue #4][issue]. The private
 [in-memory domain model](model.md) implements physical/logical topology, identity evidence and attachment-freshness
 primitives for issue #5. The binary still parses a placeholder command and performs no device operations.
+Issue #6 adds [operation-level capability reports and an in-memory refresh cache](capabilities.md), including
+firmware/protocol evidence and topology-enforced invalidation.
 No discovery, backend, application event service, daemon or D-Bus API exists yet. Other examples below describe
 planned behavior.
 
@@ -50,7 +52,7 @@ CLI rendering and mode selection           Desktop clients
 | CLI | Argument interpretation, mode selection, human/structured rendering, exit status | Protocol decoding or duplicate lifecycle rules |
 | User daemon | Foreground process lifetime, ownership, discovery tasks, session-bus export | Additional device privileges or desktop policy |
 | Application service | Operations, committed snapshots, event ordering, lifecycle and capability policy | CLI formatting or D-Bus wire types |
-| Domain model | Logical keyboards, physical devices, interfaces, components and identities; future capabilities/observation quality | OS handles and vendor packet formats |
+| Domain model | Topology, identities and capability evidence/cache; future observed values and quality | OS handles and vendor packet formats |
 | Protocol backend | Recognize supported firmware, select safe queries, decode and normalize observations | Presentation, bus export or global ownership policy |
 | Transport | Bounded I/O, endpoint opening/closing, connection errors | Meaning of battery or layers |
 | Linux integration | Enumeration/hotplug, node metadata, permissions and attachment handles | Vendor protocol semantics |
@@ -95,7 +97,7 @@ It distinguishes source evidence from proposed mappings and unresolved implement
 
 ## Implementation sequence and verification targets
 
-1. Build on the implemented topology, identity and attachment primitives with domain snapshots and application
+1. Build on the implemented topology, identity, attachment and capability-cache primitives with domain snapshots and application
    lifecycle transitions using simulated backends; verify unknown/stale observations and snapshot/event ordering.
 2. Implement Linux discovery and direct status for one verified firmware/transport combination. Test permission
    failures, bounded safe probing and reconnects on hardware before advertising that combination as supported.

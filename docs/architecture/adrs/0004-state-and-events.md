@@ -4,6 +4,8 @@ Status: Accepted design; implementation pending.
 
 The [domain model](../model.md) implements topology retirement and attachment/target freshness checks for issue #5.
 The application service, observation application, committed snapshots and event delivery below remain planned work.
+Issue #6 also implements a topology-owned [capability cache](../capabilities.md) with refresh supersession and
+structural/attachment/context invalidation. That cache does not implement normalized-state snapshots or events.
 
 ## Context
 
