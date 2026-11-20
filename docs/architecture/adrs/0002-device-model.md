@@ -1,6 +1,7 @@
 # ADR 0002: Separate topology, transport, protocol and capabilities
 
-Status: Accepted design; implementation pending.
+Status: Accepted design; topology, identity and connection primitives implemented for issue #5.
+Capabilities, protocol backends and application lifecycle integration remain pending.
 
 ## Context
 
@@ -14,15 +15,21 @@ Use the following vocabulary throughout the core and adapters:
 
 | Concept | Meaning |
 |---|---|
-| Device | A logical keyboard, possibly partially observed, that a user addresses as one unit |
+| Logical keyboard (Device in the planned D-Bus API) | A keyboard, possibly partially observed, that a user addresses as one unit |
+| Physical device | One hardware unit independently discovered by the host, owning interfaces and endpoints; one keyboard may aggregate several |
+| Interface | A host-visible interface of a physical device, not a keyboard or an inferred internal part |
 | Component | An independently meaningful part: main body, half, controller or module; optionally a child of another component |
 | Transport endpoint | A host-accessible channel and its attachment, such as a serial port or a HID interface |
 | Backend | Protocol-specific recognition, safe query selection, decoding and mapping into domain observations |
 | Capability | A named, typed observation or future operation that a device/component can support |
 
-Components form a simple parent/child hierarchy within a device. An endpoint may serve several components; a device
-may use several endpoints. Components need not have an endpoint of their own. Keep the association in the backend
-session; do not expose transport handles or arbitrary vendor packets through the domain API.
+Each physical device belongs to one logical keyboard and may have zero or more interfaces/endpoints/components.
+An endpoint optionally references an interface of the same physical device. Components form a parent/child forest
+within a physical owner; independently discovered units are associated through keyboard membership. Hidden parts
+remain components unless independently discovered by the host. An endpoint may serve several components; a keyboard
+may use several endpoints. Components need not have an endpoint of their own. Keep routing in the backend session;
+do not expose transport handles or arbitrary vendor packets through the domain API. Aggregation is explicit and
+caller-directed, never inferred from interface counts, side labels or matching display names.
 
 Linux integration enumerates candidates and their metadata. Backends match supported interface/firmware evidence
 and use transports for bounded I/O. Matching a vendor ID is insufficient permission to send arbitrary probes.
@@ -31,14 +38,19 @@ affect identity, availability and lifecycle. HID and USB serial are both require
 
 ### Identity
 
-Assign opaque runtime IDs to devices and component instances, unique within a service epoch. Public object paths
-derive from those IDs, never raw device nodes or serial numbers. Retire IDs on removal; never reuse them in the same
-epoch. Keep endpoint attachment generations separate so a reconnect cannot accept delayed work from an old handle.
+Assign distinct opaque runtime IDs to keyboards, physical devices, interfaces, endpoints and components. Never
+reuse them within the process lifetime, even across independent topology instances; rediscovery of retired instances
+allocates fresh IDs. The future service epoch scopes them externally. Public object paths derive from runtime IDs,
+never raw device nodes or serial numbers. Keep attachment generations separate so revalidation also rejects delayed
+work from an old handle without needing to retire hardware.
 
 Persistently matching a physical keyboard is optional and evidence-based: use verified device/protocol identifiers
 when available, with an explicit confidence/ambiguity indication. VID/PID identifies a family, not an individual;
 `/dev/hidrawN`, `/dev/ttyACMN` and USB port paths are not durable identity. Do not merge two halves or devices based
-only on side names, discovery order or similar descriptors. Ambiguous associations remain partial devices.
+only on side names, discovery order or similar descriptors. Ambiguous associations remain partial keyboards.
+Missing identity evidence is explicit. Verified unit identity is distinct from advertised identifiers and group/pairing
+claims; collisions preserve separate runtime records and produce ambiguous candidates. Hardware evidence may remain
+the same across reconnects while runtime IDs change. There is no on-disk identity persistence yet.
 
 ### Capabilities and observations
 
@@ -74,6 +86,7 @@ Future controls require explicit typed capabilities and shared validation; there
 
 ## Consequences and follow-up
 
-Partial availability and firmware variation are ordinary domain states. Core tests can model split/module scenarios
-without actual USB access. Backend work must establish pairing evidence and safe capability detection per firmware;
-this ADR deliberately leaves exact Rust traits, crate selection and polling intervals to that work.
+Partial availability and firmware variation are ordinary domain states. The implemented
+[domain model and invariants](../model.md) include synthetic split/module tests without actual USB access.
+Backend work must establish pairing evidence and safe capability detection per firmware; this ADR deliberately
+leaves backend traits, crate selection and polling intervals to that work.

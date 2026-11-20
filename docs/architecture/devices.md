@@ -3,6 +3,7 @@
 This is feasibility research, not a supported-device list. Sources were reviewed on **2026-11-20**.
 No KBCTL backend or physical-device validation accompanies this document. Source claims apply to their particular
 firmware, revisions and connection modes; a product's typing connectivity does not establish management connectivity.
+The [implemented domain model](model.md) tests the proposed topologies with synthetic discovery data only.
 
 ## Evidence matrix
 
@@ -28,6 +29,7 @@ Linux metadata can identify a candidate keyboard without permitting active manag
 and access information, with protocol support unknown or unsupported as appropriate. Do not infer live layer/RGB
 state from QMK build definitions, probe arbitrary report IDs, or ask the user to flash firmware to obtain support.
 Multiple interfaces from one keyboard must not appear as multiple logical keyboards.
+The domain fixture groups those interfaces under one host-discovered physical-device record.
 
 ### Defy: one half unavailable
 
@@ -36,6 +38,8 @@ Mark the right component unavailable and its previous observations stale. Report
 than averaging the halves or returning zero for the missing one. If the protocol cannot distinguish absence from
 an unanswered query, report unknown reachability instead. A Bluetooth typing connection alone does not imply that
 the USB serial management endpoint is available.
+The domain fixture represents a discovered Neuron as the physical unit and its controller/hidden halves as components.
+If the host independently discovers other units in a verified mode, they receive their own physical-device records.
 
 ### Naya Create: module removed and a second pair attached
 
@@ -44,6 +48,8 @@ present. When a second pair is attached, correlate halves using verified identif
 VID/PID or discovery order. If association is ambiguous, expose separate partial logical devices with that limitation
 instead of combining unrelated halves. A reattached module gets a new runtime instance; delayed results for its old
 attachment cannot populate the new one.
+The domain fixture explicitly associates two discovered physical halves into one keyboard and represents hidden modules
+as component children of their half. Independently discovered modules would instead receive physical-device records.
 
 ## Backend admission work
 

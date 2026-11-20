@@ -9,6 +9,7 @@ use miette::MietteHandlerOpts;
 
 mod cli;
 mod error;
+mod model;
 
 use cli::{Cli, Command};
 use error::Result;

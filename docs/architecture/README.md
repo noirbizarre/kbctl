@@ -4,9 +4,11 @@ KBCTL is a unified control plane for programmable keyboards. Its initial focus i
 which keyboards and components are present, whether they are accessible, and what state their existing firmware
 can safely report. Firmware, battery and active runtime state are optional observations, not universal promises.
 
-**Implementation status:** these decisions define the target architecture for [issue #4][issue]. The current Rust
-binary parses a placeholder command and performs no device operations. No backend, daemon or D-Bus API exists yet.
-Examples and module names below describe planned behavior.
+**Implementation status:** these decisions define the target architecture for [issue #4][issue]. The private
+[in-memory domain model](model.md) implements physical/logical topology, identity evidence and attachment-freshness
+primitives for issue #5. The binary still parses a placeholder command and performs no device operations.
+No discovery, backend, application event service, daemon or D-Bus API exists yet. Other examples below describe
+planned behavior.
 
 ## Goals and boundaries
 
@@ -48,7 +50,7 @@ CLI rendering and mode selection           Desktop clients
 | CLI | Argument interpretation, mode selection, human/structured rendering, exit status | Protocol decoding or duplicate lifecycle rules |
 | User daemon | Foreground process lifetime, ownership, discovery tasks, session-bus export | Additional device privileges or desktop policy |
 | Application service | Operations, committed snapshots, event ordering, lifecycle and capability policy | CLI formatting or D-Bus wire types |
-| Domain model | Devices, components, identities, capabilities and observation quality | OS handles and vendor packet formats |
+| Domain model | Logical keyboards, physical devices, interfaces, components and identities; future capabilities/observation quality | OS handles and vendor packet formats |
 | Protocol backend | Recognize supported firmware, select safe queries, decode and normalize observations | Presentation, bus export or global ownership policy |
 | Transport | Bounded I/O, endpoint opening/closing, connection errors | Meaning of battery or layers |
 | Linux integration | Enumeration/hotplug, node metadata, permissions and attachment handles | Vendor protocol semantics |
@@ -83,7 +85,7 @@ plugin ABI, async runtime or specific device/D-Bus crate is selected here. Diagn
 | ADR | Decision |
 |---|---|
 | [0001: Execution model](adrs/0001-execution-model.md) | Shared service in a single binary; explicit modes and per-user ownership |
-| [0002: Device model](adrs/0002-device-model.md) | Separate devices, components, endpoints, backends and capabilities |
+| [0002: Device model](adrs/0002-device-model.md) | Separate logical keyboards, physical devices, interfaces, components, endpoints and capabilities |
 | [0003: Session D-Bus API](adrs/0003-session-dbus-api.md) | Versioned object model and typed capability interfaces |
 | [0004: State and events](adrs/0004-state-and-events.md) | Revisioned committed state, bounded live delivery and snapshot resynchronization |
 | [0005: Linux device access](adrs/0005-linux-device-access.md) | Unprivileged processes, narrowly scoped access and safe status queries |
@@ -93,15 +95,15 @@ It distinguishes source evidence from proposed mappings and unresolved implement
 
 ## Implementation sequence and verification targets
 
-1. Implement domain snapshots and lifecycle transitions with simulated backends; verify unknown/stale values,
-   attachment generations, partial components and snapshot/event ordering.
+1. Build on the implemented topology, identity and attachment primitives with domain snapshots and application
+   lifecycle transitions using simulated backends; verify unknown/stale observations and snapshot/event ordering.
 2. Implement Linux discovery and direct status for one verified firmware/transport combination. Test permission
    failures, bounded safe probing and reconnects on hardware before advertising that combination as supported.
 3. Host the same service in the user daemon, add the versioned session API, and compare direct and remote snapshots.
    Verify startup races, bus-owner changes, slow consumers and restart resynchronization.
 4. Extend verified device/firmware coverage; add desktop consumers independently of protocol backends.
 
-These are future implementation checks. This documentation change does not demonstrate hardware compatibility.
+These are future implementation checks. In-memory domain tests do not demonstrate hardware compatibility.
 The existing systemd user-unit file is a template placeholder; its current command does not start a daemon.
 
 [issue]: https://github.com/noirbizarre/kbctl/issues/4

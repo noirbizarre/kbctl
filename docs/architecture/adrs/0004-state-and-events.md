@@ -2,6 +2,9 @@
 
 Status: Accepted design; implementation pending.
 
+The [domain model](../model.md) implements topology retirement and attachment/target freshness checks for issue #5.
+The application service, observation application, committed snapshots and event delivery below remain planned work.
+
 ## Context
 
 Discovery, protocol replies and removal can race. A CLI or desktop client must not miss an update between its initial
@@ -64,6 +67,12 @@ Snapshots can always recover current state; no delivery or history is promised a
 Every in-flight operation carries its endpoint generation and target instance. Reject completions after cancellation,
 generation change or target retirement. A removed component cannot reappear because an earlier request completed late.
 Reconcile discovery after monitor interruption; enumeration and queued hotplug events must not create duplicate devices.
+
+The implemented primitives also check the target's original keyboard membership. Physical-device retirement removes
+its owned interfaces, endpoints and represented components, preserving other physical members of the keyboard.
+Endpoint unavailability alone does not retire the physical unit; the application must determine loss of presence.
+The application must serialize freshness validation with observation application and add per-operation cancellation
+guards when it introduces cancellable work. Domain tokens alone do not implement the full cancellation policy.
 
 Retirement removes records from current snapshots and emits removals in the coherent stream and corresponding standard
 D-Bus interface-removal signals. Retain no unbounded disconnected-device history. Loss of one endpoint is not proof
