@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="docs/images/icon.svg" alt="kbctl" width="160">
-</p>
-
 <h1 align="center">kbctl</h1>
 
 <p align="center"><strong>A unified control plane for programmable keyboards</strong></p>
