@@ -52,6 +52,12 @@ kbctl --help
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Architecture
+
+See the [architecture overview and decision records](docs/architecture/README.md) for the status-first design,
+execution modes, device model and hardware research. These describe the intended architecture; device backends
+and the user daemon are not implemented yet.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
