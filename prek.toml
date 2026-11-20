@@ -1,0 +1,76 @@
+default_install_hook_types = ["pre-commit", "commit-msg"]
+
+# Generators own these bytes; hooks must not rewrite release output or lockfiles.
+exclude = { glob = [
+  "CHANGELOG.md",
+  "Cargo.lock",
+  "mise.lock",
+] }
+
+[[repos]]
+repo = "builtin"
+hooks = [
+  { id = "check-added-large-files" },
+  { id = "check-merge-conflict" },
+  { id = "check-toml" },
+  { id = "check-yaml" },
+  { id = "check-json" },
+  # Rust files are excluded because `cargo fmt` below already owns their final newline
+  { id = "end-of-file-fixer", exclude_types = ["rust"] },
+  { id = "mixed-line-ending" },
+  { id = "trailing-whitespace" },
+]
+
+[[repos]]
+repo = "https://github.com/commitizen-tools/commitizen"
+rev = "v4.19.3"
+[[repos.hooks]]
+id = "commitizen"
+stages = ["commit-msg"]
+additional_dependencies = ["emotional==0.6.1"]
+
+[[repos]]
+repo = "https://github.com/rhysd/actionlint"
+rev = "v1.7.12"
+hooks = [{ id = "actionlint-system" }]
+
+[[repos]]
+repo = "https://github.com/rvben/rumdl-pre-commit"
+rev = "v0.3.2"
+hooks = [
+  { id = "rumdl-fmt" },
+  { id = "rumdl-check" },
+]
+
+[[repos]]
+repo = "https://github.com/crate-ci/typos"
+rev = "v1.47.1"
+hooks = [
+  { id = "typos" },
+  # Check the message before it enters release history; do not rewrite it.
+  # Wait for https://github.com/crate-ci/typos/pull/1605 to avoid false positive on commit/rebase
+  # { id = "typos", alias = "typos-commit-msg", args = ["--force-exclude"], stages = ["commit-msg"]},
+]
+
+[[repos]]
+repo = "https://github.com/editorconfig-checker/editorconfig-checker"
+rev = "v4.0.2"
+# rumdl and rustfmt understand prose and embedded Rust strings; generic indentation checks do not.
+hooks = [{ id = "editorconfig-checker", exclude_types = ["markdown", "rust"] }]
+
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "fmt"
+name = "cargo fmt"
+language = "system"
+entry = "cargo fmt --all -- --check"
+files = "\\.rs$"
+pass_filenames = false
+
+# --- project-specific hooks --------------------------------------------------
+#
+# Add architecture guards and other project-only hooks below this line.
+# The template owns everything above it and will keep updating it.
+# Everything here is yours, and Git's 3-way merge preserves it across `git tpl update`.

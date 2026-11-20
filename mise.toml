@@ -1,0 +1,216 @@
+# Toolchain and task definitions.
+#
+# Tool versions are resolved to exact builds in `mise.lock`, which is committed.
+# CI installs from these two files, so local runs and CI runs use identical tool versions.
+#
+# Tools no CI job needs are declared on their own task rather than in `[tools]`,
+# because `mise install` — what CI runs — installs `[tools]` only.
+# It matters as cargo-binstall has no prebuilt artifact for some cargo tools,
+# so a global entry would make every CI job compile them from source.
+[settings]
+# Resolve tools through mise.lock and keep it updated.
+lockfile = true
+
+# The explicit Rust entry supplies native wrapping. Avoid a second request
+# from the version file; runtime selection below preserves CI's toolchain.
+idiomatic_version_file_enable_tools = []
+
+[tools]
+# Keep the install request stable and lockable; runtime selection lives in env.
+rust = { version = "stable", components = ["rustfmt", "clippy"], mr_boxington = true }
+mr-boxington = "latest"
+actionlint = "latest"
+# actionlint silently skips its shellcheck integration when the binary is absent
+shellcheck = "latest"
+prek = "latest"
+typos = "latest"
+git-cliff = "latest"
+cargo-binstall = "latest"
+"cargo:cargo-nextest" = "latest"
+"cargo:cargo-llvm-cov" = "latest"
+"cargo:git-tpl" = "latest"
+
+# --- begin project-specific tools ---
+# Add project-wide tools here; tools needed by only one task belong on that task.
+# --- end project-specific tools ---
+
+[env]
+# dtolnay selects a rustup default, not RUSTUP_TOOLCHAIN. Explicit selections
+# win; otherwise retain that default in Actions and the project's channel locally.
+RUSTUP_TOOLCHAIN = """
+{%- if env.RUSTUP_TOOLCHAIN | default(value='', boolean=true) -%}
+{{ env.RUSTUP_TOOLCHAIN }}
+{%- elif env.GITHUB_ACTIONS | default(value='') == 'true' -%}
+{{ exec(command='rustup default') | trim | split(pat=' ') | first }}
+{%- else -%}
+stable
+{%- endif -%}
+"""
+# Keep existing target outputs in place; automatic cache collection follows
+# the developer's global mbx policy (or mbx's bounded defaults).
+MBX_TARGET_VIEWS = "0"
+
+[hooks]
+postinstall = [
+  "prek install"
+]
+
+# --- Everyday ---------------------------------------------------------------
+[tasks.default]
+description = "Run format, lint, build and test"
+depends = ["format", "lint", "lint:actions", "lint:md", "build", "test"]
+
+[tasks.build]
+description = "Build the project"
+run = "cargo build"
+sources = [
+  "Cargo.toml",
+  "Cargo.lock",
+  "rust-toolchain.toml",
+  "mise.lock",
+  ".cargo/config",
+  ".cargo/config.toml",
+  "build.rs",
+  "src/**",
+]
+outputs = [
+  'target/debug/kbctl{% if os() == "windows" %}.exe{% endif %}',
+]
+
+[tasks.test]
+description = "Run tests (accepts nextest selectors)"
+raw_args = true
+run = "cargo nextest run"
+
+[tasks.cover]
+description = "Run tests with coverage"
+run = "cargo llvm-cov nextest"
+
+[tasks.format]
+description = "Format the code"
+run = "cargo fmt --all"
+
+[tasks."format:check"]
+description = "Check the formatting without rewriting"
+run = "cargo fmt --all -- --check"
+
+[tasks.lint]
+description = "Lint the code"
+run = "cargo clippy --all-targets --all-features -- -D warnings"
+
+[tasks.spell]
+description = "Check spelling"
+run = "typos"
+
+[tasks."lint:actions"]
+description = "Lint the GitHub Actions workflows"
+# Suppressions live in .github/actionlint.yml rather than as flags here,
+# so this task and the prek hook cannot drift apart.
+run = "actionlint .github/workflows/*.yaml"
+
+[tasks."lint:md"]
+description = "Lint all project Markdown"
+# Install the native binary only for this task; keep its version aligned with
+# the rumdl pre-commit hook in prek.toml.
+tools = { rumdl = "0.3.2" }
+# The shared rumdl config excludes the generated root CHANGELOG.md.
+run = "rumdl check ."
+
+[tasks.snapshots]
+description = "Review and update insta snapshots interactively"
+# cargo-insta is declared here as only used once by this task
+tools = { "cargo:cargo-insta" = "latest" }
+run = "cargo insta review"
+
+[tasks.check]
+description = "Run every check that does not modify the working tree"
+depends = ["format:check", "lint", "lint:actions", "lint:md", "spell", "test"]
+
+[tasks.ci]
+description = "Everything CI runs, locally"
+depends = ["check"]
+
+# --- kbctl itself ---------------------------------------------------
+
+[tasks.cli]
+description = "Run kbctl from source"
+raw_args = true
+run = "cargo run --bin kbctl --"
+
+[tasks.setup]
+description = "Install kbctl locally, into ~/.cargo/bin"
+run = "cargo install --path . --force"
+
+[tasks.man]
+description = "Collect the generated man page and shell completions into dist/"
+# build.rs writes them into the build script's OUT_DIR, which cargo places in
+# a hash-suffixed directory. Rather than guessing the hash, ask cargo where
+# the build script ran via its JSON message stream.
+tools = { jq = "latest" }
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+out=$(cargo build --message-format=json 2>/dev/null \
+  | jq -r 'select(.reason == "build-script-executed") | select(.package_id | test("kbctl")) | .out_dir' \
+  | tail -n 1)
+test -n "$out" || { echo "could not locate OUT_DIR" >&2; exit 1; }
+rm -rf dist/man dist/completions
+mkdir -p dist/man dist/completions
+cp "$out"/man/*.1 dist/man/
+cp "$out"/completions/* dist/completions/
+echo "dist/man ($(ls dist/man | wc -l) pages), dist/completions ($(ls dist/completions | wc -l) shells)"
+"""
+
+# --- Release ----------------------------------------------------------------
+
+[tasks.changelog]
+description = "Preview the changelog for the unreleased commits"
+run = "git cliff --unreleased"
+
+[tasks.release]
+description = "Show the version the next release would take"
+# The release itself is driven by gh-ship from .github/workflows/ship.yaml.
+# This task exists to answer 'what would ship next?' without opening CI.
+run = "git cliff --bumped-version"
+
+[tasks."ship:validate"]
+description = "Check the release setup against what gh-ship requires"
+run = "gh ship validate"
+
+# --- Template ---------------------------------------------------------------
+#
+# This project is rendered from https://github.com/noirbizarre/rust.tpl
+# To update it:
+#
+#   mise tpl:check       # has it moved?
+#   mise tpl:update      # bring the rendered ref up to date
+#   mise tpl:diff        # read what merging it would change
+#   mise tpl:merge       # take it
+
+[tasks."tpl:update"]
+description = "Advance refs/tpl/<id>; may save migrated answers without merging rendered files"
+raw_args = true
+run = "git tpl update"
+
+[tasks."tpl:diff"]
+description = "Show what merging the template would change"
+raw_args = true
+run = "git tpl diff"
+
+[tasks."tpl:merge"]
+description = "Merge the last updated rendered files"
+raw_args = true
+run = "git tpl merge"
+
+[tasks."tpl:check"]
+description = "Has the template moved? Exits 1 if merging it would change anything"
+run = [
+  "git tpl update",
+  "git tpl diff --exit-code --stat",
+]
+
+# --- project-specific tasks --------------------------------------------------
+#
+# Add your own tasks below this line and global tools between the tools markers.
+# Group related project tasks here; the template owns the sections above.
+# Git's 3-way merge preserves project additions across template merges.
