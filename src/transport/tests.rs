@@ -46,11 +46,13 @@ fn attachment(kind: TransportKind) -> (EndpointId, AttachmentGeneration) {
                 name: None,
                 identity: HardwareIdentity::missing(IdentityAbsence::NotReported),
                 usb_ids: None,
+                serial: None,
                 interfaces: vec![],
                 endpoints: vec![EndpointSpec {
                     interface: None,
                     transport: kind,
                     locator: EndpointLocator::new("synthetic").unwrap(),
+                    hid: Default::default(),
                 }],
                 components: vec![],
             },

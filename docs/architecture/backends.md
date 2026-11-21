@@ -3,14 +3,15 @@
 The private [`src/backends/`](../../src/backends/mod.rs) and [`src/transport/`](../../src/transport/mod.rs) modules
 implement the hardware-free contract for [issue #7](https://github.com/noirbizarre/kbctl/issues/7). Shared session
 machinery enforces ownership lifetime, request cancellation, bounded delivery and result binding. Synthetic protocols
-exercise that machinery; no real keyboard protocol, OS opener, registry, daemon or CLI device command is implemented.
+exercise that machinery. Issue #8 adds the separate [metadata registry](registry.md); no real keyboard protocol,
+OS opener, daemon or CLI device command is implemented.
 
 ## Boundaries
 
 | Layer | Responsibility |
 |---|---|
 | Application host | Enumerate hardware, resolve registry candidates, acquire process ownership, open safe channels, schedule progress/timers and commit accepted state |
-| Vendor mapping | Select protocol configuration and relevant endpoints from metadata; real definitions belong to #8 |
+| Registry/vendor mapping | Source-backed identification, endpoint-role selection and proposed topology; real protocol references are research-only |
 | `Backend` | Describe identity/update strategy, match metadata without I/O, and connect a selected candidate using transferred leases |
 | Shared `Session` | Own channels, enforce lifecycle, serialize requests, validate replies/routes/bounds and publish backend observations |
 | `ProtocolDriver` | Recognize known firmware, frame/correlate requests, decode replies and unsolicited reports, and interpret capability support |
@@ -23,14 +24,18 @@ registers these private modules; its placeholder command still performs no devic
 
 ## Discovery and selection
 
-`DiscoveryView` exposes one host-discovered physical unit, its interfaces and endpoints. A backend's `match_metadata`
-returns `NoMatch` or a `BackendCandidate` with backend/configuration identity, distinct endpoint IDs and typed evidence.
-The current vocabulary includes USB model IDs, interface numbers and transport kind. Further registry metadata and
-actual device definitions belong to #8.
+`DiscoveryView` exposes one host-discovered physical unit, its interfaces and endpoints through read-only accessors.
+Its validated restricted view rejects duplicate/foreign endpoints and exposes only their associated interfaces.
+A backend's `match_metadata` returns `NoMatch` or a `BackendCandidate` with backend/configuration identity, distinct
+endpoint IDs and typed evidence. Evidence can describe USB model IDs, exact advertised serial, interface numbers,
+transport kind and collection-local HID usage page/usage.
 
-`MatchResolution` preserves no match, a single candidate, or multiple ambiguous candidates; it does not rank them by
-an invented confidence score. Backend selection is distinct from matching stable hardware identities. Unknown or
-ambiguous devices remain discovery facts rather than being sent exploratory packets.
+`MatchResolution` canonically sorts/deduplicates identical backend/configuration/endpoint ownership sets and merges
+their evidence, while retaining distinct alternatives as ambiguous. Endpoint vectors are unordered ownership sets;
+primary and named role bindings are explicit registry/context data. The [registry](registry.md) preserves role and
+classification ambiguity beyond this lower-level aggregation and calls matchers only for justified enabled mappings.
+No confidence score or registration-order choice is used. Backend selection is distinct from stable hardware identity;
+unknown or ambiguous devices remain discovery facts rather than being sent exploratory packets.
 
 Metadata matching performs no I/O. Active recognition is a bounded, allowlisted handshake after lease transfer.
 Discovery is not a continuing connectivity guarantee: connection can fail because a device disappeared, access was

@@ -12,11 +12,13 @@ fn unit() -> PhysicalDeviceSpec {
         name: None,
         identity: HardwareIdentity::missing(IdentityAbsence::NotReported),
         usb_ids: None,
+        serial: None,
         interfaces: vec![],
         endpoints: vec![EndpointSpec {
             interface: None,
             transport: TransportKind::Serial,
             locator: EndpointLocator::new("synthetic-channel").unwrap(),
+            hid: Default::default(),
         }],
         components: vec![ComponentSpec {
             name: None,

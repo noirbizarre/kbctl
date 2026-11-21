@@ -9,6 +9,7 @@ pub(crate) mod events;
 pub(crate) mod session;
 
 use std::{
+    collections::{BTreeMap, BTreeSet},
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -19,7 +20,7 @@ use std::{
 use crate::{
     model::{
         capability::{CapabilityReport, CapabilityScope},
-        identity::{BackendSessionId, ComponentId, EndpointId, PhysicalDeviceId},
+        identity::{AdvertisedSerial, BackendSessionId, ComponentId, EndpointId, PhysicalDeviceId},
         observation::DeviceObservation,
         topology::{Endpoint, Interface, PhysicalDevice, Topology, UsbIds},
     },
@@ -66,9 +67,9 @@ impl BackendDescriptor {
 }
 
 pub(crate) struct DiscoveryView<'a> {
-    pub(crate) physical: &'a PhysicalDevice,
-    pub(crate) interfaces: Vec<&'a Interface>,
-    pub(crate) endpoints: Vec<&'a Endpoint>,
+    physical: &'a PhysicalDevice,
+    interfaces: Vec<&'a Interface>,
+    endpoints: Vec<&'a Endpoint>,
 }
 impl<'a> DiscoveryView<'a> {
     pub(crate) fn new(topology: &'a Topology, physical: PhysicalDeviceId) -> Result<Self> {
@@ -80,13 +81,58 @@ impl<'a> DiscoveryView<'a> {
             endpoints: topology.endpoints(physical).collect(),
         })
     }
+    pub(crate) fn physical(&self) -> &'a PhysicalDevice {
+        self.physical
+    }
+    pub(crate) fn interfaces(&self) -> impl Iterator<Item = &'a Interface> + '_ {
+        self.interfaces.iter().copied()
+    }
+    pub(crate) fn endpoints(&self) -> impl Iterator<Item = &'a Endpoint> + '_ {
+        self.endpoints.iter().copied()
+    }
+
+    /// A protocol matcher sees only the channels justified by a registry route,
+    /// never descriptors borrowed from a foreign physical device or sibling route.
+    pub(crate) fn restricted(&self, selected: &[EndpointId]) -> Result<Self> {
+        let unique: BTreeSet<_> = selected.iter().copied().collect();
+        if unique.len() != selected.len()
+            || !unique
+                .iter()
+                .all(|id| self.endpoints().any(|endpoint| endpoint.id() == *id))
+        {
+            return Err(BackendError::new(
+                FailureKind::InvalidInput,
+                "restricted discovery selection contains duplicate or foreign endpoints",
+            ));
+        }
+        let endpoints: Vec<_> = self
+            .endpoints()
+            .filter(|endpoint| unique.contains(&endpoint.id()))
+            .collect();
+        let interface_ids: BTreeSet<_> = endpoints
+            .iter()
+            .filter_map(|endpoint| endpoint.interface())
+            .collect();
+        let interfaces = self
+            .interfaces()
+            .filter(|interface| interface_ids.contains(&interface.id()))
+            .collect();
+        Ok(Self {
+            physical: self.physical,
+            interfaces,
+            endpoints,
+        })
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum MatchEvidence {
     UsbModel(UsbIds),
     Interface(u8),
     Transport(crate::model::connection::TransportKind),
+    AdvertisedSerial(AdvertisedSerial),
+    HidUsagePage(u16),
+    HidUsage(u16),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,8 +146,8 @@ impl BackendCandidate {
     pub(crate) fn new(
         backend: &str,
         configuration: &str,
-        endpoints: Vec<EndpointId>,
-        evidence: Vec<MatchEvidence>,
+        mut endpoints: Vec<EndpointId>,
+        mut evidence: Vec<MatchEvidence>,
     ) -> Result<Self> {
         let unique: std::collections::BTreeSet<_> = endpoints.iter().collect();
         if backend.trim().is_empty()
@@ -115,6 +161,11 @@ impl BackendCandidate {
                 "candidate needs a backend/configuration, distinct endpoints and match evidence",
             ));
         }
+        // Endpoints describe an ownership set. Protocol roles and the primary
+        // source must be carried explicitly, never encoded in vector order.
+        endpoints.sort();
+        evidence.sort();
+        evidence.dedup();
         Ok(Self {
             backend: backend.into(),
             configuration: configuration.into(),
@@ -134,6 +185,11 @@ impl BackendCandidate {
     pub(crate) fn evidence(&self) -> &[MatchEvidence] {
         &self.evidence
     }
+    pub(crate) fn add_evidence(&mut self, evidence: impl IntoIterator<Item = MatchEvidence>) {
+        self.evidence.extend(evidence);
+        self.evidence.sort();
+        self.evidence.dedup();
+    }
 }
 
 #[derive(Debug)]
@@ -141,7 +197,7 @@ pub(crate) enum MatchHint {
     NoMatch,
     Candidate(BackendCandidate),
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum MatchResolution {
     NoMatch,
     Candidate(BackendCandidate),
@@ -150,13 +206,25 @@ pub(crate) enum MatchResolution {
 impl MatchResolution {
     /// Preserve ambiguity instead of smuggling registry ranking into this contract.
     pub(crate) fn from_hints(hints: impl IntoIterator<Item = MatchHint>) -> Self {
-        let mut candidates: Vec<_> = hints
-            .into_iter()
-            .filter_map(|hint| match hint {
-                MatchHint::NoMatch => None,
-                MatchHint::Candidate(candidate) => Some(candidate),
-            })
-            .collect();
+        let mut canonical: BTreeMap<_, BackendCandidate> = BTreeMap::new();
+        for hint in hints {
+            if let MatchHint::Candidate(candidate) = hint {
+                let key = (
+                    candidate.backend.clone(),
+                    candidate.configuration.clone(),
+                    candidate.endpoints.clone(),
+                );
+                match canonical.entry(key) {
+                    std::collections::btree_map::Entry::Vacant(entry) => {
+                        entry.insert(candidate);
+                    }
+                    std::collections::btree_map::Entry::Occupied(mut entry) => {
+                        entry.get_mut().add_evidence(candidate.evidence);
+                    }
+                }
+            }
+        }
+        let mut candidates: Vec<_> = canonical.into_values().collect();
         match candidates.len() {
             0 => Self::NoMatch,
             1 => Self::Candidate(candidates.remove(0)),

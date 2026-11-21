@@ -3,6 +3,8 @@
 Status: Accepted design; topology, identity and connection primitives implemented for issue #5, and capability
 metadata/cache for issue #6. Issue #7 implements [backend contracts and a fake-backed session lifecycle](../backends.md).
 Real hardware backends and application lifecycle integration remain pending.
+Issue #8 implements a separate [metadata registry](../registry.md) with qualified source-backed identification and
+non-mutating topology plans; model identification does not establish operation support.
 
 ## Context
 

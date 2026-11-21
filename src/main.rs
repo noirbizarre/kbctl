@@ -11,6 +11,7 @@ mod backends;
 mod cli;
 mod error;
 mod model;
+mod registry;
 mod transport;
 
 use cli::{Cli, Command};

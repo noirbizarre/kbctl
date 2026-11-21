@@ -15,6 +15,11 @@ The CLI does not consume the model yet. No identifiers or topology are persisted
 | `Endpoint` | Host-accessible management channel belonging to exactly one physical device; optional interface association |
 | `Component` | Meaningful body, half, controller, receiver, dongle or module represented through one physical device |
 
+Issue #8 adds optional exact `AdvertisedSerial` metadata to physical units and partial `HidMetadata` usage page/usage
+facts to addressable HID endpoints. Advertised serial is independent from verified identity evidence; missing serial
+is valid. Usage facts belong to that endpoint's collection, not every collection sharing its USB interface. HID facts
+on serial transports are rejected. Display names remain independent from discovery matching.
+
 A physical device can have zero or more interfaces, endpoints and recognized components. An interface can have
 multiple endpoints. Here, endpoint means a communication channel, not necessarily a literal USB endpoint descriptor.
 An endpoint's interface, when supplied, must belong to its physical owner. Serial channels need not invent an
@@ -51,6 +56,11 @@ not independently mutable copies of live instances. Errors identify offending re
 
 An unavailable endpoint is not proof of missing hardware. Future application/discovery code decides when there is
 enough presence evidence to invoke retirement; the domain model does not infer it from a failed query.
+
+The [registry](registry.md) proposes component/association plans without mutating these records or capability state.
+Multiple interfaces retain their physical unit's existing keyboard. Templates are not evidence of component presence,
+and common family names, side labels or equal advertised serials do not pair independent physical units. The host
+must explicitly accept/revalidate plans before applying existing topology operations.
 
 ## Identity and names
 

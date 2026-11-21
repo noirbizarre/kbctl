@@ -163,6 +163,12 @@ pub(crate) enum ModelError {
         help("Discard old work and establish a new binding after revalidating the endpoint.")
     )]
     StaleAttachment(EndpointId),
+    #[error("endpoint {index} has HID collection metadata on a non-HID transport")]
+    #[diagnostic(
+        code(kbctl::model::unexpected_hid_metadata),
+        help("Attach usage facts only to the HID collection that actually reported them.")
+    )]
+    UnexpectedHidMetadata { index: usize },
 }
 
 #[cfg(test)]

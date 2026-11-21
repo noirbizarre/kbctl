@@ -10,8 +10,9 @@ use super::{
         TransportKind, UnavailableReason,
     },
     identity::{
-        AttachmentGeneration, ComponentId, EndpointId, HardwareIdentity, IdentityComparison,
-        InterfaceId, KeyboardId, MembershipGeneration, PhysicalDeviceId, nonblank,
+        AdvertisedSerial, AttachmentGeneration, ComponentId, EndpointId, HardwareIdentity,
+        IdentityComparison, InterfaceId, KeyboardId, MembershipGeneration, PhysicalDeviceId,
+        nonblank,
     },
 };
 
@@ -31,7 +32,7 @@ impl DisplayName {
 }
 
 /// Model-family metadata, never an individual device's identity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct UsbIds {
     pub(crate) vendor: u16,
     pub(crate) product: u16,
@@ -91,6 +92,7 @@ pub(crate) struct PhysicalDevice {
     name: DisplayName,
     identity: HardwareIdentity,
     usb_ids: Option<UsbIds>,
+    serial: Option<AdvertisedSerial>,
 }
 
 impl PhysicalDevice {
@@ -108,6 +110,9 @@ impl PhysicalDevice {
     }
     pub(crate) fn usb_ids(&self) -> Option<UsbIds> {
         self.usb_ids
+    }
+    pub(crate) fn serial(&self) -> Option<&AdvertisedSerial> {
+        self.serial.as_ref()
     }
 }
 
@@ -142,6 +147,7 @@ pub(crate) struct Endpoint {
     transport: TransportKind,
     locator: EndpointLocator,
     connection: Connection,
+    hid: HidMetadata,
 }
 
 impl Endpoint {
@@ -163,6 +169,17 @@ impl Endpoint {
     pub(crate) fn state(&self) -> ConnectionState {
         self.connection.state()
     }
+    pub(crate) fn hid(&self) -> HidMetadata {
+        self.hid
+    }
+}
+
+/// Facts about this addressable HID collection, never borrowed from another
+/// collection on the same USB interface. Partial discovery stays explicit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct HidMetadata {
+    pub(crate) usage_page: Option<u16>,
+    pub(crate) usage: Option<u16>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -209,6 +226,7 @@ pub(crate) struct EndpointSpec {
     pub(crate) interface: Option<usize>,
     pub(crate) transport: TransportKind,
     pub(crate) locator: EndpointLocator,
+    pub(crate) hid: HidMetadata,
 }
 
 #[derive(Debug)]
@@ -223,6 +241,7 @@ pub(crate) struct PhysicalDeviceSpec {
     pub(crate) name: Option<DisplayName>,
     pub(crate) identity: HardwareIdentity,
     pub(crate) usb_ids: Option<UsbIds>,
+    pub(crate) serial: Option<AdvertisedSerial>,
     pub(crate) interfaces: Vec<InterfaceSpec>,
     pub(crate) endpoints: Vec<EndpointSpec>,
     pub(crate) components: Vec<ComponentSpec>,
@@ -238,7 +257,10 @@ impl PhysicalDeviceSpec {
                 return Err(ModelError::DuplicateInterface { number });
             }
         }
-        for endpoint in &self.endpoints {
+        for (index, endpoint) in self.endpoints.iter().enumerate() {
+            if endpoint.transport != TransportKind::Hid && endpoint.hid != HidMetadata::default() {
+                return Err(ModelError::UnexpectedHidMetadata { index });
+            }
             if let Some(index) = endpoint.interface
                 && index >= self.interfaces.len()
             {
@@ -384,6 +406,7 @@ impl Topology {
                 transport: endpoint.transport,
                 locator: endpoint.locator,
                 connection: Connection::new(),
+                hid: endpoint.hid,
             });
         }
         // No fallible work follows: allocation exhaustion must not leave a
@@ -407,6 +430,7 @@ impl Topology {
                 name: DisplayName::or_fallback(spec.name, "Unknown physical device"),
                 identity: spec.identity,
                 usb_ids: spec.usb_ids,
+                serial: spec.serial,
             },
         );
         for (id, interface) in interface_ids.into_iter().zip(spec.interfaces) {

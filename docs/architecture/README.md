@@ -10,8 +10,10 @@ primitives for issue #5. The binary still parses a placeholder command and perfo
 Issue #6 adds [operation-level capability reports and an in-memory refresh cache](capabilities.md), including
 firmware/protocol evidence and topology-enforced invalidation.
 Issue #7 adds [executor-neutral backend/transport contracts and shared session lifecycle](backends.md), exercised by
-fake protocols with typed battery/firmware observations. Real discovery/registry mappings, OS openers/ownership locks,
-hardware backends, the application event service, daemon and D-Bus API remain pending. Other examples below describe
+fake protocols with typed battery/firmware observations. Issue #8 adds a [deterministic metadata registry](registry.md)
+and source-backed target identifiers, with real protocol references remaining research-only. Host enumeration,
+OS openers/ownership locks, hardware backends, the application event service, daemon and D-Bus API remain pending.
+Other examples below describe
 planned behavior.
 
 ## Goals and boundaries
@@ -74,6 +76,7 @@ src/cli.rs            argument types only (also consumed by build.rs)
 src/error.rs          typed actionable diagnostics
 src/app/              application operations, snapshots and lifecycle
 src/model/            device/component/capability vocabulary
+src/registry/         identification definitions, metadata matching and proposed routes
 src/backends/         protocol-specific recognition and queries
 src/transport/        HID and serial I/O boundaries
 src/platform/linux/   discovery, permissions and ownership locking
@@ -99,7 +102,7 @@ It distinguishes source evidence from proposed mappings and unresolved implement
 
 ## Implementation sequence and verification targets
 
-1. Build on the implemented model and fake-backed session lifecycle with a registry, full normalized state and
+1. Build on the implemented model, registry and fake-backed session lifecycle with full normalized state and
    application snapshots; verify unknown/stale observations and snapshot/event ordering.
 2. Implement Linux discovery and direct status for one verified firmware/transport combination. Test permission
    failures, bounded safe probing and reconnects on hardware before advertising that combination as supported.

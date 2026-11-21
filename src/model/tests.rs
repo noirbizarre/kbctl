@@ -52,10 +52,12 @@ fn unit(label: &str) -> PhysicalDeviceSpec {
             product: 0x5678,
         }),
         interfaces: vec![],
+        serial: None,
         endpoints: vec![EndpointSpec {
             interface: None,
             transport: TransportKind::Serial,
             locator: EndpointLocator::new("/dev/example").unwrap(),
+            hid: Default::default(),
         }],
         components: vec![component(ComponentKind::Body, None)],
     }
@@ -80,6 +82,7 @@ fn multiple_interfaces_of_a_gmmk_pro_form_one_logical_keyboard() {
             interface: Some(index),
             transport: TransportKind::Hid,
             locator: EndpointLocator::new(format!("/dev/hidraw{index}")).unwrap(),
+            hid: Default::default(),
         })
         .collect();
     let physical = topology.add_physical_device(None, spec).unwrap();

@@ -231,11 +231,13 @@ impl Rig {
                         product: 1,
                     }),
                     interfaces: vec![],
+                    serial: None,
                     endpoints: (0..endpoint_count)
                         .map(|index| EndpointSpec {
                             interface: None,
                             transport: TransportKind::Serial,
                             locator: EndpointLocator::new(format!("fake-{index}")).unwrap(),
+                            hid: Default::default(),
                         })
                         .collect(),
                     components: if components {
@@ -427,7 +429,7 @@ impl Backend for FakeBackend {
         &self.descriptor
     }
     fn match_metadata(&self, discovery: &DiscoveryView<'_>) -> MatchHint {
-        if discovery.physical.usb_ids()
+        if discovery.physical().usb_ids()
             != Some(UsbIds {
                 vendor: 0xfffe,
                 product: 1,
@@ -436,8 +438,7 @@ impl Backend for FakeBackend {
             return MatchHint::NoMatch;
         }
         let endpoints: Vec<_> = discovery
-            .endpoints
-            .iter()
+            .endpoints()
             .filter(|endpoint| endpoint.transport() == TransportKind::Serial)
             .map(|endpoint| endpoint.id())
             .collect();

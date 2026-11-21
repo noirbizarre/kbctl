@@ -62,6 +62,18 @@ impl BackendSessionId {
     }
 }
 
+/// An exact advertised descriptor, not a verified unit identity or pairing key.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct AdvertisedSerial(String);
+impl AdvertisedSerial {
+    pub(crate) fn new(value: impl Into<String>) -> Result<Self> {
+        nonblank(value.into(), "advertised serial").map(Self)
+    }
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Group identifiers describe association, never individual hardware identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum IdentityScope {

@@ -26,6 +26,7 @@ fn empty_unit() -> PhysicalDeviceSpec {
             crate::model::identity::IdentityAbsence::NotReported,
         ),
         usb_ids: None,
+        serial: None,
         interfaces: vec![],
         endpoints: vec![],
         components: vec![],
@@ -60,7 +61,7 @@ fn independent_feature_backends_use_the_shared_session_without_unrelated_read_in
 fn metadata_matching_preserves_ambiguity_without_opening_or_querying_hardware() {
     let rig = Rig::new(1, true);
     let physical = rig.topology.endpoint(rig.primary).unwrap().physical();
-    let mut view = DiscoveryView::new(&rig.topology, physical).unwrap();
+    let view = DiscoveryView::new(&rig.topology, physical).unwrap();
     let battery = backend(Profile::Battery);
     let firmware = backend(Profile::Firmware);
     let matches = MatchResolution::from_hints([
@@ -75,7 +76,7 @@ fn metadata_matching_preserves_ambiguity_without_opening_or_querying_hardware() 
         MatchResolution::from_hints([battery.match_metadata(&view)]),
         MatchResolution::Candidate(_)
     ));
-    view.endpoints.clear();
+    let view = view.restricted(&[]).unwrap();
     assert!(matches!(battery.match_metadata(&view), MatchHint::NoMatch));
     assert!(matches!(
         MatchResolution::from_hints([MatchHint::NoMatch]),
@@ -83,6 +84,74 @@ fn metadata_matching_preserves_ambiguity_without_opening_or_querying_hardware() 
     ));
     assert_eq!(rig.wires[&rig.primary].writes(), 0);
     assert!(rig.log.lock().unwrap().is_empty());
+}
+
+#[test]
+fn exact_backend_routes_canonicalize_endpoint_sets_and_merge_evidence_without_hiding_alternatives()
+{
+    let rig = Rig::new(2, true);
+    let mut reversed = rig.endpoints.clone();
+    reversed.reverse();
+    let a = BackendCandidate::new(
+        "a",
+        "config",
+        reversed,
+        vec![MatchEvidence::Transport(
+            crate::model::connection::TransportKind::Serial,
+        )],
+    )
+    .unwrap();
+    let b = BackendCandidate::new(
+        "a",
+        "config",
+        rig.endpoints.clone(),
+        vec![MatchEvidence::UsbModel(crate::model::topology::UsbIds {
+            vendor: 0xfffe,
+            product: 1,
+        })],
+    )
+    .unwrap();
+    let other = BackendCandidate::new(
+        "b",
+        "config",
+        rig.endpoints.clone(),
+        vec![MatchEvidence::Transport(
+            crate::model::connection::TransportKind::Serial,
+        )],
+    )
+    .unwrap();
+    let first = MatchResolution::from_hints([
+        MatchHint::Candidate(other.clone()),
+        MatchHint::Candidate(a.clone()),
+        MatchHint::Candidate(b.clone()),
+    ]);
+    let second = MatchResolution::from_hints([
+        MatchHint::Candidate(b.clone()),
+        MatchHint::Candidate(a.clone()),
+        MatchHint::Candidate(other),
+    ]);
+    assert_eq!(first, second);
+    let MatchResolution::Ambiguous(routes) = first else {
+        panic!("different backends must remain ambiguous");
+    };
+    assert_eq!(routes.len(), 2);
+    assert_eq!(routes[0].backend(), "a");
+    assert_eq!(routes[0].evidence().len(), 2);
+    assert_eq!(routes[0].endpoints(), rig.endpoints);
+    assert!(matches!(
+        MatchResolution::from_hints([MatchHint::Candidate(a), MatchHint::Candidate(b)]),
+        MatchResolution::Candidate(_)
+    ));
+}
+
+#[test]
+fn restricted_discovery_views_reject_duplicate_and_foreign_endpoint_references() {
+    let rig = Rig::new(1, true);
+    let foreign = Rig::new(1, true);
+    let physical = rig.topology.endpoint(rig.primary).unwrap().physical();
+    let view = DiscoveryView::new(&rig.topology, physical).unwrap();
+    assert!(view.restricted(&[rig.primary, rig.primary]).is_err());
+    assert!(view.restricted(&[foreign.primary]).is_err());
 }
 
 #[test]

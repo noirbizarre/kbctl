@@ -3,7 +3,8 @@
 This is feasibility research, not a supported-device list. Sources were reviewed on **2026-11-20**.
 No KBCTL backend or physical-device validation accompanies this document. Source claims apply to their particular
 firmware, revisions and connection modes; a product's typing connectivity does not establish management connectivity.
-The [implemented domain model](model.md) tests the proposed topologies with synthetic discovery data only.
+The [implemented domain model](model.md) tests proposed topologies with synthetic discovery data. Issue #8 adds a
+[metadata registry](registry.md) with source-backed identification definitions and explicitly qualified fixtures.
 
 ## Evidence matrix
 
@@ -20,6 +21,31 @@ nayactl, so they are not two independent confirmations of the wire protocol. nay
 
 Naya's former product URL now serves a notice from a new domain owner. It is not used as a historical product
 specification. Existing firmware and locally available configuration tools remain outside KBCTL's ownership.
+
+## Source-backed identification definitions
+
+The built-in registry records these exact identifiers from the pinned sources. They are identification data, not an
+access/permission allowlist, proof of installed firmware or a supported-device list.
+
+| VID:PID | Source mapping | Evidence and limits |
+|---|---|---|
+| `320f:5044` | GMMK Pro rev1 ANSI identifier | [QMK target definition][qmk], upstream firmware source; no stock/QMK/VIA installation inference or verified management interface/usage selector |
+| `35ef:0010` | Defy wired runtime | [Vendor wired mapping][defy-wired]; USB serial reference remains research-only |
+| `35ef:0011` | Defy wired bootloader | [Vendor wired mapping][defy-wired]; distinct bootloader classification, no runtime management candidate |
+| `35ef:0012` | Defy wireless runtime | [Vendor wireless mapping][defy-wireless]; no Bluetooth management or firmware-version guarantee |
+| `35ef:0013` | Defy wireless bootloader | [Vendor wireless mapping][defy-wireless]; no runtime management candidate |
+| `37d1:0064` | Naya Create left | [Community constants][naya-constants]; no verified pairing identity |
+| `37d1:00c8` | Naya Create right | [Community constants][naya-constants]; no automatic association with a left half |
+| `37d1:012c` | Naya Create dongle | [Community constants][naya-constants]; routing and firmware coverage still need verification |
+
+[nayactl's discovery implementation][naya-discovery] filters serial ports by VID/PID and records a serial number when
+present. It does not require a particular serial value or establish uniqueness/pairing. The registry preserves that
+optional advertised fact separately from verified hardware identity and does not copy first-device-by-side selection.
+
+All built-in Defy/Naya serial protocol references are research-only; GMMK has no management selector. Built-in
+definitions create no executable hardware backend or capability claims. Their expected component templates describe
+proposed topology, not observed presence. The original model fixtures use synthetic identifiers; registry fixtures
+exercise the source-backed ID table with separately labeled synthetic interface/channel descriptors.
 
 ## Concrete scenarios
 
@@ -58,8 +84,8 @@ rules, allowlisted non-mutating queries, expected response bounds, and disconnec
 opening the transport does not reset the device or disrupt normal input. Keep protocol captures free of key events
 and unnecessary identifiers. Unknown firmware may be discoverable without enabling active queries.
 
-No exact VID/PID allowlist, installation rule, polling interval or transport crate is established by this research.
-Those decisions require the verified backend and hardware access work described in the [overview](README.md).
+The registry now has the identification list above. A safe-query/access allowlist, installation rules, polling intervals
+and concrete OS transport adapters still require verified backend/hardware work described in the [overview](README.md).
 
 ## Sources
 
@@ -68,7 +94,11 @@ Repository references are pinned to the revisions reviewed. Product pages can ch
 - [QMK: GMMK Pro rev1 ANSI hardware definition][qmk].
 - [Dygma: Defy product specifications][defy].
 - [Dygma: Bazecor README, USB serial requirement][bazecor].
+- [Dygma: Defy wired runtime and bootloader mapping][defy-wired].
+- [Dygma: Defy wireless runtime and bootloader mapping][defy-wireless].
 - [nayactl: README, status example and protocol-reference links][nayactl].
+- [nayactl: USB identifier constants][naya-constants].
+- [nayactl: serial-port discovery and optional serial metadata][naya-discovery].
 - [OpenFlow: README, topology and vendored nayactl attribution][openflow].
 
 [qmk]: https://github.com/qmk/qmk_firmware/blob/80973aa0b5413e9a5bbbf9293507f39e870f9aa3/keyboards/gmmk/pro/rev1/ansi/keyboard.json
@@ -76,3 +106,7 @@ Repository references are pinned to the revisions reviewed. Product pages can ch
 [bazecor]: https://github.com/Dygmalab/Bazecor/blob/f49f25b11ce21ec22cd8fd6ad44410d749793c07/README.md
 [nayactl]: https://github.com/Qonfused/nayactl/blob/8049c9f94d4df9f9c432574f1ae68b10578c38ef/README.md
 [openflow]: https://github.com/create-collective/openflow/blob/7c622cae903d01db473b8d888ccf0a023c60bd5f/README.md
+[defy-wired]: https://github.com/Dygmalab/Bazecor/blob/f49f25b11ce21ec22cd8fd6ad44410d749793c07/src/api/hardware-dygma-defy-wired/index.ts
+[defy-wireless]: https://github.com/Dygmalab/Bazecor/blob/f49f25b11ce21ec22cd8fd6ad44410d749793c07/src/api/hardware-dygma-defy-wireless/index.ts
+[naya-constants]: https://github.com/Qonfused/nayactl/blob/8049c9f94d4df9f9c432574f1ae68b10578c38ef/src/nayactl/constants.py
+[naya-discovery]: https://github.com/Qonfused/nayactl/blob/8049c9f94d4df9f9c432574f1ae68b10578c38ef/src/nayactl/discovery.py
