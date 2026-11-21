@@ -9,7 +9,9 @@ can safely report. Firmware, battery and active runtime state are optional obser
 primitives for issue #5. The binary still parses a placeholder command and performs no device operations.
 Issue #6 adds [operation-level capability reports and an in-memory refresh cache](capabilities.md), including
 firmware/protocol evidence and topology-enforced invalidation.
-No discovery, backend, application event service, daemon or D-Bus API exists yet. Other examples below describe
+Issue #7 adds [executor-neutral backend/transport contracts and shared session lifecycle](backends.md), exercised by
+fake protocols with typed battery/firmware observations. Real discovery/registry mappings, OS openers/ownership locks,
+hardware backends, the application event service, daemon and D-Bus API remain pending. Other examples below describe
 planned behavior.
 
 ## Goals and boundaries
@@ -52,7 +54,7 @@ CLI rendering and mode selection           Desktop clients
 | CLI | Argument interpretation, mode selection, human/structured rendering, exit status | Protocol decoding or duplicate lifecycle rules |
 | User daemon | Foreground process lifetime, ownership, discovery tasks, session-bus export | Additional device privileges or desktop policy |
 | Application service | Operations, committed snapshots, event ordering, lifecycle and capability policy | CLI formatting or D-Bus wire types |
-| Domain model | Topology, identities and capability evidence/cache; future observed values and quality | OS handles and vendor packet formats |
+| Domain model | Topology, identities, capability evidence/cache and minimal status observations; future state/freshness store | OS handles and vendor packet formats |
 | Protocol backend | Recognize supported firmware, select safe queries, decode and normalize observations | Presentation, bus export or global ownership policy |
 | Transport | Bounded I/O, endpoint opening/closing, connection errors | Meaning of battery or layers |
 | Linux integration | Enumeration/hotplug, node metadata, permissions and attachment handles | Vendor protocol semantics |
@@ -97,8 +99,8 @@ It distinguishes source evidence from proposed mappings and unresolved implement
 
 ## Implementation sequence and verification targets
 
-1. Build on the implemented topology, identity, attachment and capability-cache primitives with domain snapshots and application
-   lifecycle transitions using simulated backends; verify unknown/stale observations and snapshot/event ordering.
+1. Build on the implemented model and fake-backed session lifecycle with a registry, full normalized state and
+   application snapshots; verify unknown/stale observations and snapshot/event ordering.
 2. Implement Linux discovery and direct status for one verified firmware/transport combination. Test permission
    failures, bounded safe probing and reconnects on hardware before advertising that combination as supported.
 3. Host the same service in the user daemon, add the versioned session API, and compare direct and remote snapshots.

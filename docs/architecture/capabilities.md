@@ -3,7 +3,8 @@
 The private [`src/model/capability.rs`](../../src/model/capability.rs) module implements support evidence and an
 in-memory discovery cache for [issue #6](https://github.com/noirbizarre/kbctl/issues/6). Backends can describe a small
 subset of operations without implementing unrelated features. These types do not implement device commands,
-transport probing, normalized observed values, runtime-event delivery or a backend trait.
+transport probing or a normalized state store. Issue #7 supplies the separate [backend contract](backends.md),
+minimal typed status values and backend event delivery.
 
 ## Operations and access
 
@@ -24,7 +25,8 @@ from the operation, so metadata cannot accidentally describe reading a battery a
 
 Indicators mean keyboard-reported logical indicators, not a desktop's interpretation of host lock state. Lighting
 describes general keyboard illumination. Layer activation is distinct from rewriting keymaps. Names classify support;
-operation payloads and finer-grained backend operations remain future work. No flashing or raw passthrough is modeled.
+additional operation payloads and finer-grained backend operations remain future work. No flashing or raw passthrough
+is modeled.
 
 Read-only means semantically non-mutating with respect to keyboard configuration. Status queries can require outbound
 bytes and write-capable transport handles. Event subscription changes delivery bookkeeping, not keyboard configuration.
@@ -139,6 +141,9 @@ and requires rediscovery; it does not silently mark old support current again.
 non-SemVer restrictions, scope isolation, source validation, complete replacement, refresh ordering, abandonment,
 permission/busy retention and structural/context invalidation. Existing topology tests remain applicable.
 
-Backend contracts and discovery scheduling are subsequent work. Normalized state, command/event payloads, timestamps,
-snapshots and event delivery remain separate from capability metadata. See the [domain model](model.md),
+The [implemented backend contract](backends.md) publishes discovered reports through real refresh tokens, including
+supersession/abandonment and keyboard scopes without components. Its read interfaces use their driver's current
+interpreted support evidence; the topology cache remains the application's published view. Discovery scheduling,
+full normalized state, additional payloads, timestamps, snapshots and committed events remain separate work.
+See the [domain model](model.md),
 [ADR 0002](adrs/0002-device-model.md) and [ADR 0004](adrs/0004-state-and-events.md).

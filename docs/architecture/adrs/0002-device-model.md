@@ -1,7 +1,8 @@
 # ADR 0002: Separate topology, transport, protocol and capabilities
 
 Status: Accepted design; topology, identity and connection primitives implemented for issue #5, and capability
-metadata/cache for issue #6. Protocol backends and application lifecycle integration remain pending.
+metadata/cache for issue #6. Issue #7 implements [backend contracts and a fake-backed session lifecycle](../backends.md).
+Real hardware backends and application lifecycle integration remain pending.
 
 ## Context
 

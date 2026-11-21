@@ -11,6 +11,7 @@
 pub(crate) mod capability;
 pub(crate) mod connection;
 pub(crate) mod identity;
+pub(crate) mod observation;
 pub(crate) mod topology;
 
 use identity::{ComponentId, EndpointId, KeyboardId, PhysicalDeviceId};
@@ -150,6 +151,18 @@ pub(crate) enum ModelError {
         refresh: identity::CapabilityRefreshId,
         scope: capability::CapabilityScope,
     },
+    #[error("battery percentage {value} is outside 0..=100")]
+    #[diagnostic(
+        code(kbctl::model::invalid_percentage),
+        help("Reject the malformed reading rather than clamping or reporting a fabricated value.")
+    )]
+    InvalidPercentage { value: u16 },
+    #[error("attachment for endpoint {0} is no longer current")]
+    #[diagnostic(
+        code(kbctl::model::stale_attachment),
+        help("Discard old work and establish a new binding after revalidating the endpoint.")
+    )]
+    StaleAttachment(EndpointId),
 }
 
 #[cfg(test)]

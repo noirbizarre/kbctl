@@ -101,8 +101,8 @@ Renaming a keyboard or physical unit changes neither runtime identity nor hardwa
 `TransportKind` currently distinguishes HID and serial channels. `ConnectionState` is independently unvalidated, ready
 with an `AttachmentGeneration`, or unavailable with a typed reason such as permission denial, busy channel,
 disconnection, suspend or protocol failure. Ready means the adapter validated the channel, not that every capability
-works or that normal typing is healthy. Capability support is tracked separately from channel availability;
-observed values and observation quality remain future work.
+works or that normal typing is healthy. Capability support is tracked separately from channel availability.
+Issue #7 adds minimal typed battery/firmware observations; the full state store and freshness model remain future work.
 
 `revalidate_endpoint` issues a fresh generation, even for a previously ready endpoint. `invalidate_endpoint` makes
 all work from the previous ready attachment stale without removing physical hardware. Restored access requires
@@ -115,9 +115,19 @@ and back from reviving old tokens, including work from an unchanged endpoint tar
 A token validates freshness, not backend authorization
 to route a query to that component. The application must serialize validation with applying an observation; this
 standalone check is not a concurrency transaction or a per-operation cancellation mechanism.
+`begin_attachment`/`validate_attachment` also capture endpoint generation, physical membership and keyboard without a
+component target, allowing keyboard-only backend bindings to reject stale attachment contexts.
 
-Polling, I/O cancellation, retries, access recovery, suspend orchestration, discovery reconciliation, committed snapshots
-and event delivery remain application-layer work described by [ADR 0004](adrs/0004-state-and-events.md).
+The [backend/session contract](backends.md) implements admitted-request cancellation, resource release and bounded
+backend event delivery. Scheduling, retries, access recovery, suspend orchestration, discovery reconciliation and
+committed snapshot/event publication remain host/application work described by [ADR 0004](adrs/0004-state-and-events.md).
+
+## Minimal status observations
+
+`model::observation` defines known/unknown/reported-unavailable values, validated percentages, partial battery state
+and firmware version facts for typed backend replies/events. A failed request stays an error, and unknown battery
+level is not zero. Session/source/target envelopes carry binding context for acceptance, not a full state/provenance
+store. Cached state, timestamps, freshness calculations and additional feature payloads belong to issue #9.
 
 ## Capability evidence
 

@@ -52,8 +52,15 @@ runtime_id!(
     ComponentId,
     AttachmentGeneration,
     MembershipGeneration,
-    CapabilityRefreshId
+    CapabilityRefreshId,
+    BackendSessionId
 );
+
+impl BackendSessionId {
+    pub(crate) fn new() -> Result<Self> {
+        Self::allocate()
+    }
+}
 
 /// Group identifiers describe association, never individual hardware identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

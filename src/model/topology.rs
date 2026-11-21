@@ -6,8 +6,8 @@ use super::{
     ModelError, Result,
     capability::CapabilityCache,
     connection::{
-        Connection, ConnectionState, EndpointLocator, OperationToken, TransportKind,
-        UnavailableReason,
+        AttachmentToken, Connection, ConnectionState, EndpointLocator, OperationToken,
+        TransportKind, UnavailableReason,
     },
     identity::{
         AttachmentGeneration, ComponentId, EndpointId, HardwareIdentity, IdentityComparison,
@@ -642,6 +642,32 @@ impl Topology {
             endpoint_membership: source.membership,
             target_membership: self.physical_device(target.physical)?.membership,
         })
+    }
+
+    pub(crate) fn begin_attachment(&self, endpoint: EndpointId) -> Result<AttachmentToken> {
+        let channel = self.endpoint(endpoint)?;
+        let source = self.physical_device(channel.physical)?;
+        let ConnectionState::Ready(generation) = channel.state() else {
+            return Err(ModelError::EndpointNotReady(endpoint));
+        };
+        Ok(AttachmentToken {
+            endpoint,
+            generation,
+            physical: source.id,
+            keyboard: source.keyboard,
+            membership: source.membership,
+        })
+    }
+
+    pub(crate) fn validate_attachment(&self, token: AttachmentToken) -> Result<()> {
+        if self
+            .begin_attachment(token.endpoint)
+            .is_ok_and(|current| current == token)
+        {
+            Ok(())
+        } else {
+            Err(ModelError::StaleAttachment(token.endpoint))
+        }
     }
 
     pub(crate) fn validate_completion(&self, token: OperationToken) -> Result<()> {

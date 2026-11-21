@@ -3,7 +3,8 @@
 use super::{
     Result,
     identity::{
-        AttachmentGeneration, ComponentId, EndpointId, KeyboardId, MembershipGeneration, nonblank,
+        AttachmentGeneration, ComponentId, EndpointId, KeyboardId, MembershipGeneration,
+        PhysicalDeviceId, nonblank,
     },
 };
 
@@ -81,4 +82,14 @@ pub(crate) struct OperationToken {
     pub(super) keyboard: KeyboardId,
     pub(super) endpoint_membership: MembershipGeneration,
     pub(super) target_membership: MembershipGeneration,
+}
+
+/// Captured before connecting, including for keyboards with no known components.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AttachmentToken {
+    pub(super) endpoint: EndpointId,
+    pub(super) generation: AttachmentGeneration,
+    pub(super) physical: PhysicalDeviceId,
+    pub(super) keyboard: KeyboardId,
+    pub(super) membership: MembershipGeneration,
 }

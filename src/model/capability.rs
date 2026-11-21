@@ -172,15 +172,7 @@ impl CapabilityReport {
         operations: Vec<(CapabilityOperation, CapabilityEntry)>,
     ) -> Result<Self> {
         let reporter = nonblank(reporter.into(), "capability reporter")?;
-        let mut version_keys = BTreeSet::new();
-        for version in &versions {
-            if !version_keys.insert((version.kind, &version.namespace)) {
-                return Err(ModelError::DuplicateCapabilityVersion {
-                    kind: version.kind,
-                    namespace: version.namespace.clone(),
-                });
-            }
-        }
+        validate_versions(&versions)?;
         let mut entries = BTreeMap::new();
         for (operation, entry) in operations {
             if entries.insert(operation, entry).is_some() {
@@ -213,6 +205,19 @@ impl CapabilityReport {
         self.entry(operation)
             .map_or(Support::Unknown, |entry| entry.support)
     }
+}
+
+pub(super) fn validate_versions(versions: &[ReportedVersion]) -> Result<()> {
+    let mut keys = BTreeSet::new();
+    for version in versions {
+        if !keys.insert((version.kind, &version.namespace)) {
+            return Err(ModelError::DuplicateCapabilityVersion {
+                kind: version.kind,
+                namespace: version.namespace.clone(),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Also serves as accepted-report provenance. The unique refresh ID prevents

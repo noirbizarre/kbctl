@@ -7,9 +7,11 @@ use std::process::ExitCode;
 use clap::Parser;
 use miette::MietteHandlerOpts;
 
+mod backends;
 mod cli;
 mod error;
 mod model;
+mod transport;
 
 use cli::{Cli, Command};
 use error::Result;

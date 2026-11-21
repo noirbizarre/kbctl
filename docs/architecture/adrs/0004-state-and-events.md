@@ -6,6 +6,8 @@ The [domain model](../model.md) implements topology retirement and attachment/ta
 The application service, observation application, committed snapshots and event delivery below remain planned work.
 Issue #6 also implements a topology-owned [capability cache](../capabilities.md) with refresh supersession and
 structural/attachment/context invalidation. That cache does not implement normalized-state snapshots or events.
+Issue #7 implements a separate [backend observation channel](../backends.md) with session-binding checks and bounded
+delivery. It is an input to the future application commit stream, not an implementation of its epoch/revision contract.
 
 ## Context
 
