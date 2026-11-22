@@ -3,7 +3,7 @@
 The private [`src/model/`](../../src/model/mod.rs) modules implement the in-memory domain layer for
 [issue #5](https://github.com/noirbizarre/kbctl/issues/5), extended with [capability reports and cache](capabilities.md)
 for issue #6. They perform no enumeration, transport I/O or firmware queries.
-The CLI does not consume the model yet. No identifiers or topology are persisted to disk.
+The [CLI](../cli.md) consumes normalized input/indicator snapshots. No identifiers or topology are persisted to disk.
 
 ## Records and ownership
 

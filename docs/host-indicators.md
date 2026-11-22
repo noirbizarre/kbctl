@@ -2,7 +2,7 @@
 
 Issue [#12](https://github.com/noirbizarre/kbctl/issues/12) adds an internal, read-only Linux input-indicator collector for
 Caps Lock, Num Lock and Scroll Lock. It publishes through the existing normalized runtime; queries use `StateReader`
-snapshots and changes use its atomic snapshot/subscription API. The placeholder CLI does not start this service.
+snapshots and changes use its atomic snapshot/subscription API. The [CLI](cli.md) hosts it for read-only status and watch.
 
 ## Reporting scope and outcomes
 
@@ -105,7 +105,7 @@ real adapter is `platform::linux::indicators::LinuxOpener`, constructed with `Ar
 known keyboard endpoints or endpoints advertising a standard lock LED code. Known keyboards with unreadable metadata
 still receive explicit collection/access outcomes. Unrelated input endpoints are not opened to guess programmability.
 
-A future direct/daemon host starts metadata discovery, acquires ownership for collection, and calls indicator `step`.
+The direct CLI host (and a future daemon host) starts metadata discovery, acquires ownership and calls indicator `step`.
 It registers event-mode FDs from `service.leases()` and `lease.registration()`, associating each with its endpoint and
 collector generation, then passes matching readiness/HUP/error tokens back to `step`. Registrations are borrowed only
 for readiness: do not duplicate, close or reconfigure them outside their lease/ownership lifetime. Re-register changed
@@ -135,7 +135,8 @@ knowledge instead of extending it silently. Synchronous opens/ioctls are not giv
 Explicit `stop` terminally closes leases and retires sources, retaining unfinished lifecycle work on publication failure.
 Subsequent steps finish retirement without reopening sources. Drop closes
 resources but does not mutate a borrowed runtime; a surviving host must continue driving expiry for retained reports.
-No background thread, async runtime, CLI, daemon loop or D-Bus exporter is introduced.
+The collector itself introduces no background thread or async runtime. The CLI provides the synchronous readiness and
+deadline loop; daemon hosting and D-Bus export remain separate integrations.
 
 ## Verification
 

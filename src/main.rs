@@ -7,12 +7,14 @@ use std::process::ExitCode;
 use clap::Parser;
 use miette::MietteHandlerOpts;
 
+mod application;
 mod backends;
 mod cli;
 mod error;
 mod indicators;
 mod input;
 mod model;
+mod output;
 mod platform;
 mod registry;
 mod runtime;
@@ -21,7 +23,8 @@ mod state;
 mod test_support;
 mod transport;
 
-use cli::{Cli, Command};
+use application::Operation;
+use cli::{Cli, Command, DeviceCommand, IndicatorCommand};
 use error::Result;
 
 fn main() -> ExitCode {
@@ -29,28 +32,60 @@ fn main() -> ExitCode {
     let verbose = args.verbose > 0 || std::env::var_os("RUST_BACKTRACE").is_some();
     install_miette_hook(verbose);
 
-    let result = match args.command {
-        Command::Run => run(),
+    let operation = match args.command {
+        Command::Device {
+            command: DeviceCommand::List,
+        } => Operation::Devices,
+        Command::Device {
+            command: DeviceCommand::Inspect { device },
+        } => Operation::Inspect(device),
+        Command::Indicator {
+            command: IndicatorCommand::Status,
+        } => Operation::Indicators,
+        Command::Indicator {
+            command: IndicatorCommand::Watch,
+        } => Operation::Watch,
+        Command::Status => Operation::Status,
     };
+    let result = run(&operation, args.json);
 
     match result {
         Ok(()) => ExitCode::SUCCESS,
+        Err(error) if error.is_broken_pipe() => ExitCode::SUCCESS,
         Err(error) => {
             // Rendered here rather than returned as `miette::Result`, so the
             // exit code is chosen explicitly instead of inherited from
             // whatever the report wrapper decides.
-            eprintln!("{:?}", miette::Report::new(error));
+            if args.json {
+                if let Err(render) =
+                    output::stdout(&output::Document::failure(&operation, &error), true)
+                {
+                    if render.is_broken_pipe() {
+                        return ExitCode::SUCCESS;
+                    }
+                    eprintln!("{:?}", miette::Report::new(render));
+                }
+            } else {
+                eprintln!("{:?}", miette::Report::new(error));
+            }
             ExitCode::FAILURE
         }
     }
 }
 
-/// Run the thing.
-///
-/// Private: this crate has no library, so the logic lives beside `main` and
-/// nothing outside the binary can call it.
-fn run() -> Result<()> {
-    Ok(())
+fn run(operation: &Operation, json: bool) -> Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut host = platform::linux::application::LinuxHost::new(operation)?;
+        application::execute(&mut host, operation, |document| {
+            output::stdout(document, json)
+        })
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (operation, json);
+        Err(error::Error::UnsupportedPlatform)
+    }
 }
 
 /// Install miette's diagnostic handler.
@@ -70,14 +105,4 @@ fn install_miette_hook(verbose: bool) {
         };
         Box::new(opts.build())
     }));
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn running_with_nothing_to_do_succeeds() {
-        assert!(run().is_ok());
-    }
 }

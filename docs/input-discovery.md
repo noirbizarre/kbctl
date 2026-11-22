@@ -2,8 +2,8 @@
 
 Issue [#11](https://github.com/noirbizarre/kbctl/issues/11) implements an internal, metadata-only input discovery service.
 It inventories Linux input endpoints and supported events, classifies ordinary keyboard input, identifies USB models
-through the registry, and reconciles hotplug through the existing runtime/state service. CLI and daemon hosting remain
-future work: the placeholder command does not start this service.
+through the registry, and reconciles hotplug through the existing runtime/state service. The [CLI](cli.md) starts the
+direct discovery host; daemon hosting remains future work.
 
 ## Inventory and identity
 
@@ -73,7 +73,7 @@ can miss specialized keyboards, remotes and keypads; it is not proof of programm
 starts/reopens monitoring, drains a bounded notification batch and returns complete-or-incomplete membership scans.
 [`platform::linux::input::LinuxSource`](../src/platform/linux/input.rs) is the real adapter.
 
-A future direct/daemon host:
+The direct CLI host (and a future daemon host):
 
 1. Constructs the real source, registry, service and shared `Runtime` with the same monotonic time domain.
 2. Calls `step(now, &mut runtime)` to enable monitoring before the initial scan and publish the inventory.
@@ -114,4 +114,5 @@ mise run test -p kbctl -E 'test(input::) | test(platform::) | test(runtime::inpu
 ```
 
 These tests establish metadata and lifecycle behavior, not interoperability with a physical keyboard. Hardware status
-protocols, USB/HID discovery, indicator collectors and user-facing hosting remain their separate implementation issues.
+protocols and USB/HID management discovery remain separate work. [Host indicators](host-indicators.md) and the
+[read-only CLI host](cli.md) compose this service without changing its metadata-only boundary.

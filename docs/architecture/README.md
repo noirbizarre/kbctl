@@ -6,21 +6,23 @@ can safely report. Firmware, battery and active runtime state are optional obser
 
 **Implementation status:** these decisions define the target architecture for [issue #4][issue]. The private
 [in-memory domain model](model.md) implements physical/logical topology, identity evidence and attachment-freshness
-primitives for issue #5. The binary still parses a placeholder command and performs no device operations.
+primitives for issue #5.
 Issue #6 adds [operation-level capability reports and an in-memory refresh cache](capabilities.md), including
 firmware/protocol evidence and topology-enforced invalidation.
 Issue #7 adds [executor-neutral backend/transport contracts and shared session lifecycle](backends.md), exercised by
 fake protocols with typed battery/firmware observations. Issue #8 adds a [deterministic metadata registry](registry.md)
 and source-backed target identifiers, with real protocol references remaining research-only. Issue #9 adds
 [normalized observed state and the runtime commit service](state.md), with partial fields, explicit freshness,
-source/lifecycle reconciliation, snapshots and bounded subscriptions. Hardware-management backends, CLI/daemon hosting
+source/lifecycle reconciliation, snapshots and bounded subscriptions. Hardware-management backends, daemon hosting
 and D-Bus API integration remain pending.
 Issue #10 adds [reusable hardware-free test support](../backend-testing.md), versioned synthetic replay fixtures and
 shared backend conformance groups, with a separate [opt-in hardware-testing convention](../hardware-testing.md).
 Issue #11 adds [Linux input metadata discovery](../input-discovery.md), a host-driven hotplug/reconciliation service and
-an independent input inventory published through the same runtime. The CLI still does not start a discovery host.
+an independent input inventory published through the same runtime.
 Issue #12 adds [per-endpoint host indicator collection](../host-indicators.md), filtered evdev notifications with snapshot
-fallback, typed per-lock availability, checked opens and the shared per-user ownership guard. Hosting remains separate.
+fallback, typed per-lock availability, checked opens and the shared per-user ownership guard.
+Issue #34 adds the [read-only CLI](../cli.md) and shared application operations, with direct discovery/indicator hosting,
+human and versioned JSON output, and orderly watch shutdown.
 
 ## Goals and boundaries
 

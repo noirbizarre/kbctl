@@ -14,6 +14,10 @@ pub struct Cli {
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     pub verbose: u8,
 
+    /// Render JSON (colored on terminals, compact and uncolored when piped).
+    #[arg(long, global = true)]
+    pub json: bool,
+
     /// The subcommand to run.
     #[command(subcommand)]
     pub command: Command,
@@ -22,8 +26,40 @@ pub struct Cli {
 /// The subcommands.
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Do the thing.
-    Run,
+    /// Discover host input devices (metadata access only).
+    Device {
+        #[command(subcommand)]
+        command: DeviceCommand,
+    },
+    /// Read endpoint-scoped Caps Lock, Num Lock and Scroll Lock state.
+    Indicator {
+        #[command(subcommand)]
+        command: IndicatorCommand,
+    },
+    /// Summarize discovery and per-endpoint host indicator state.
+    Status,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DeviceCommand {
+    /// List all discovered input groups and their endpoints.
+    List,
+    /// Inspect a current sysfs path or /dev/input/event* locator.
+    #[command(
+        after_help = "Example: kbctl device inspect /dev/input/event0\nPaths are current locators, not persistent device identities."
+    )]
+    Inspect { device: std::path::PathBuf },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum IndicatorCommand {
+    /// Query kernel-maintained indicator state for each eligible endpoint.
+    Status,
+    /// Watch initial state and changes until Ctrl-C (NDJSON when piped with --json).
+    #[command(
+        after_help = "Example: kbctl --json indicator watch\nEndpoints can disagree. Kernel state does not prove physical LED illumination."
+    )]
+    Watch,
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 # ADR 0004: Committed snapshots and bounded live events
 
 Status: Accepted design; normalized runtime/store, expiry and internal subscriptions implemented for issue #9.
-Actual source collection, scheduling, daemon hosting and D-Bus adaptation remain pending.
+Input/indicator collection and direct CLI scheduling are implemented; daemon hosting and D-Bus adaptation remain pending.
 
 The [domain model](../model.md) implements topology retirement and attachment/target freshness checks for issue #5.
 Issue #6 also implements a topology-owned [capability cache](../capabilities.md) with refresh supersession and

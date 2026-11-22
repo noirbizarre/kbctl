@@ -307,3 +307,9 @@ The [host indicator guide](docs/host-indicators.md) describes endpoint scope, fi
 ownership admission and lifecycle tests. Keep Linux indicator changes read-only, test ioctl/event behavior through the
 injected seam, and use temporary private directories for ownership tests. Regular tests must never open physical input
 nodes or depend on root privileges. Preserve discovery's metadata-only boundary.
+
+## CLI integration
+
+See the [CLI guide](docs/cli.md) for commands, selectors, versioned output and exit semantics. Command tests inject
+discovery, indicator leases, clocks and cancellation through the application host boundary. Keep regular CLI tests
+hardware-free; executable tests may exercise fatal setup/ownership failures before any discovery or input-node access.

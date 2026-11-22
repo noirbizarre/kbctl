@@ -81,7 +81,7 @@ miette = { version = "7", features = ["fancy"] }
 # CLI
 clap = { version = "4", features = ["derive", "env", "wrap_help"] }
 console = "0.16"
-demand = "2"
+console-json = "0.1"
 
 # Configuration & serialisation
 serde = { version = "1", features = ["derive"] }
@@ -108,4 +108,6 @@ udev = { version = "0.9.3", default-features = false }
 # Capture native receive errors immediately; udev's iterator discards them.
 errno = "0.3"
 # Narrow evdev ioctls and checked, directory-relative ownership/open admission.
-nix = { version = "0.32", default-features = false, features = ["fs", "ioctl", "user"] }
+nix = { version = "0.32", default-features = false, features = ["fs", "ioctl", "user", "poll"] }
+# A self-pipe wakes the synchronous host without doing application work in signal handlers.
+signal-hook = "0.4"

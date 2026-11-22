@@ -3,8 +3,8 @@
 The private [`src/backends/`](../../src/backends/mod.rs) and [`src/transport/`](../../src/transport/mod.rs) modules
 implement the hardware-free contract for [issue #7](https://github.com/noirbizarre/kbctl/issues/7). Shared session
 machinery enforces ownership lifetime, request cancellation, bounded delivery and result binding. Synthetic protocols
-exercise that machinery. Issue #8 adds the separate [metadata registry](registry.md); no real keyboard protocol,
-OS opener, daemon or CLI device command is implemented.
+exercise that machinery. Issue #8 adds the separate [metadata registry](registry.md); real keyboard-management protocols
+and a daemon remain unimplemented. The [read-only CLI](../cli.md) hosts Linux discovery and host indicators separately.
 Issue #9 adds the [normalized runtime/state service](state.md) and source receipt/liveness integration described below.
 Issue #10 supplies [shared test support and conformance](../backend-testing.md), with versioned synthetic fixtures.
 
@@ -21,8 +21,8 @@ Issue #10 supplies [shared test support and conformance](../backend-testing.md),
 | Domain model | Typed observations, capability reports and freshness tokens; no vendor packets or OS handles |
 
 Vendor configuration and generic protocol parsing are separate. The same protocol can use a different mapping or
-transport adapter without importing CLI formatting, D-Bus interfaces or desktop policy. The current binary only
-registers these private modules; its placeholder command still performs no device operations.
+transport adapter without importing CLI formatting, D-Bus interfaces or desktop policy. The current binary uses shared
+application operations for discovery and host indicators; it does not start hardware-management sessions.
 
 ## Discovery and selection
 

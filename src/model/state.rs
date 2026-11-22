@@ -64,6 +64,11 @@ pub(crate) type Result<T> = std::result::Result<T, StateError>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Epoch([u8; 16]);
 impl Epoch {
+    // Presentation needs a stable opaque encoding, not Rust's Debug representation.
+    pub(crate) fn bytes(&self) -> &[u8; 16] {
+        &self.0
+    }
+
     pub(crate) fn from_bytes(bytes: [u8; 16]) -> Self {
         Self(bytes)
     }

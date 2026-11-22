@@ -42,7 +42,16 @@ Or download a binary for your platform from the
 
 ```bash
 kbctl --help
+kbctl device list
+kbctl device inspect /dev/input/event0
+kbctl status
+kbctl indicator status
+kbctl --json indicator watch
 ```
+
+On Linux, device commands discover input metadata; indicator commands read Caps Lock, Num Lock and Scroll Lock for each
+eligible endpoint. JSON is colored and pretty on supported terminals, compact and uncolored when piped. Watch emits an
+initial snapshot followed by updates until Ctrl-C. See the [CLI guide](docs/cli.md) for selectors, output and exit codes.
 
 ## Contributing
 

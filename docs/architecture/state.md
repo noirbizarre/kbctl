@@ -3,7 +3,7 @@
 Issue [#9](https://github.com/noirbizarre/kbctl/issues/9) implements a private, backend-independent observed-state
 model and commit service. [`runtime::Runtime`](../../src/runtime/mod.rs) owns topology and is the exclusive normalized
 writer. [`state::StateReader`](../../src/state/mod.rs) supplies immutable snapshots and atomic live subscriptions.
-The CLI is not wired to this service yet; hardware-management protocols, hosting, D-Bus and persistence
+The [CLI](../cli.md) queries and watches this service; hardware-management protocols, daemon hosting, D-Bus and persistence
 remain integration work. Issue #11 adds [Linux input metadata discovery](../input-discovery.md) and runtime-owned input
 group/endpoint/discovery-status records, sharing these same snapshots and commits without creating logical keyboards.
 Issue #12 adds [host indicator collection](../host-indicators.md), explicit input-source bindings and per-lock unavailable
@@ -187,6 +187,7 @@ projection and mutation atomicity. `backends/state_tests.rs` exercises actual fa
 including reverse-consumed event/reply ordering, liveness, overflow, reconnect and source separation.
 
 The model/runtime remain hardware-independent. Linux input discovery and per-endpoint host indicator collection now
-provide host-driven collection/scheduling adapters. CLI/daemon hosting and D-Bus export remain separate integrations.
+provide host-driven collection/scheduling adapters. The CLI supplies direct hosting; daemon hosting and D-Bus export
+remain separate integrations.
 Broader configuration payloads, desired state and
 cross-source winner/aggregation policies are not inferred by this model.
