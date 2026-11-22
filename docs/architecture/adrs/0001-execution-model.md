@@ -4,6 +4,7 @@ Status: Accepted design; implementation pending.
 
 Issue #7 implements [injected lease ownership and shared backend session cleanup](../backends.md).
 Process-lock acquisition, daemon hosting and CLI mode selection below remain pending.
+Issue #9 implements the shared [normalized runtime and commit service](../state.md); direct/daemon hosting can build on it.
 
 ## Context
 

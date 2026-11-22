@@ -11,10 +11,10 @@ Issue #6 adds [operation-level capability reports and an in-memory refresh cache
 firmware/protocol evidence and topology-enforced invalidation.
 Issue #7 adds [executor-neutral backend/transport contracts and shared session lifecycle](backends.md), exercised by
 fake protocols with typed battery/firmware observations. Issue #8 adds a [deterministic metadata registry](registry.md)
-and source-backed target identifiers, with real protocol references remaining research-only. Host enumeration,
-OS openers/ownership locks, hardware backends, the application event service, daemon and D-Bus API remain pending.
-Other examples below describe
-planned behavior.
+and source-backed target identifiers, with real protocol references remaining research-only. Issue #9 adds
+[normalized observed state and the runtime commit service](state.md), with partial fields, explicit freshness,
+source/lifecycle reconciliation, snapshots and bounded subscriptions. Host enumeration/collection, OS opens/ownership
+locks, hardware backends, scheduling, CLI/daemon hosting and D-Bus API integration remain pending.
 
 ## Goals and boundaries
 
@@ -56,7 +56,7 @@ CLI rendering and mode selection           Desktop clients
 | CLI | Argument interpretation, mode selection, human/structured rendering, exit status | Protocol decoding or duplicate lifecycle rules |
 | User daemon | Foreground process lifetime, ownership, discovery tasks, session-bus export | Additional device privileges or desktop policy |
 | Application service | Operations, committed snapshots, event ordering, lifecycle and capability policy | CLI formatting or D-Bus wire types |
-| Domain model | Topology, identities, capability evidence/cache and minimal status observations; future state/freshness store | OS handles and vendor packet formats |
+| Domain model | Topology, identities, capabilities, partial observations, provenance and state record types | OS handles and vendor packet formats |
 | Protocol backend | Recognize supported firmware, select safe queries, decode and normalize observations | Presentation, bus export or global ownership policy |
 | Transport | Bounded I/O, endpoint opening/closing, connection errors | Meaning of battery or layers |
 | Linux integration | Enumeration/hotplug, node metadata, permissions and attachment handles | Vendor protocol semantics |
@@ -74,7 +74,8 @@ Remain one Cargo package and one executable. Introduce private modules only as i
 src/main.rs           startup, dependency wiring, diagnostic rendering
 src/cli.rs            argument types only (also consumed by build.rs)
 src/error.rs          typed actionable diagnostics
-src/app/              application operations, snapshots and lifecycle
+src/runtime/          controlled topology/state mutation and source lifecycle reconciliation
+src/state/            committed snapshots and bounded state subscriptions
 src/model/            device/component/capability vocabulary
 src/registry/         identification definitions, metadata matching and proposed routes
 src/backends/         protocol-specific recognition and queries
@@ -102,8 +103,8 @@ It distinguishes source evidence from proposed mappings and unresolved implement
 
 ## Implementation sequence and verification targets
 
-1. Build on the implemented model, registry and fake-backed session lifecycle with full normalized state and
-   application snapshots; verify unknown/stale observations and snapshot/event ordering.
+1. Integrate the implemented runtime/state service with actual source collection and scheduling; retain source,
+   freshness and snapshot/event consistency guarantees.
 2. Implement Linux discovery and direct status for one verified firmware/transport combination. Test permission
    failures, bounded safe probing and reconnects on hardware before advertising that combination as supported.
 3. Host the same service in the user daemon, add the versioned session API, and compare direct and remote snapshots.

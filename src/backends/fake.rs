@@ -45,6 +45,9 @@ impl ManualClock {
     pub(super) fn advance(&self, duration: Duration) {
         *self.0.lock().unwrap() += duration;
     }
+    pub(super) fn rewind(&self, duration: Duration) {
+        *self.0.lock().unwrap() -= duration;
+    }
 }
 
 #[derive(Default)]
@@ -303,29 +306,39 @@ impl Rig {
         self.clock.now() + Duration::from_secs(10)
     }
     pub(super) fn leases(&self, grant: AccessGrant) -> crate::transport::Result<LeaseSet> {
+        self.leases_from(&self.topology, grant)
+    }
+    pub(super) fn leases_from(
+        &self,
+        topology: &Topology,
+        grant: AccessGrant,
+    ) -> crate::transport::Result<LeaseSet> {
+        self.leases_for(topology, &self.endpoints, grant)
+    }
+    pub(super) fn leases_for(
+        &self,
+        topology: &Topology,
+        endpoints: &[EndpointId],
+        grant: AccessGrant,
+    ) -> crate::transport::Result<LeaseSet> {
         let mut reserved = self.reserved.lock().unwrap();
-        if self
-            .endpoints
-            .iter()
-            .any(|endpoint| reserved.contains(endpoint))
-        {
+        if endpoints.iter().any(|endpoint| reserved.contains(endpoint)) {
             return Err(TransportError::InvalidLease(
                 "fake opener's cooperative reservation is already held",
             ));
         }
-        reserved.extend(self.endpoints.iter().copied());
+        reserved.extend(endpoints.iter().copied());
         drop(reserved);
         let reservation = Reservation {
-            endpoints: self.endpoints.clone(),
+            endpoints: endpoints.to_vec(),
             reserved: self.reserved.clone(),
             log: self.log.clone(),
         };
-        let leases = self
-            .endpoints
+        let leases = endpoints
             .iter()
             .map(|endpoint| {
                 let ConnectionState::Ready(generation) =
-                    self.topology.endpoint(*endpoint).unwrap().state()
+                    topology.endpoint(*endpoint).unwrap().state()
                 else {
                     panic!("revalidate before opening a new lease");
                 };
@@ -367,6 +380,11 @@ impl Rig {
     pub(super) fn reattach(&mut self) {
         for endpoint in &self.endpoints {
             self.topology.revalidate_endpoint(*endpoint).unwrap();
+        }
+        self.reopen_wires();
+    }
+    pub(super) fn reopen_wires(&mut self) {
+        for endpoint in &self.endpoints {
             self.wires.insert(*endpoint, Wire::new());
         }
     }
@@ -468,7 +486,7 @@ impl Backend for FakeBackend {
         let configuration_matches = candidate.configuration() == self.profile.label();
         let core = WireProtocol {
             sources: context.endpoints().collect(),
-            event_component: context.component_routes().next().map(|(id, _)| id),
+            routes: context.component_routes().collect(),
             primary: context.primary(),
             stage: 0,
             pending: None,
@@ -508,7 +526,7 @@ struct Pending {
 struct WireProtocol {
     sources: Vec<EndpointId>,
     primary: EndpointId,
-    event_component: Option<ComponentId>,
+    routes: BTreeMap<ComponentId, EndpointId>,
     stage: usize,
     pending: Option<Pending>,
     profile: Profile,
@@ -527,6 +545,27 @@ fn battery(level: u16) -> Result<DeviceObservation> {
 }
 
 impl WireProtocol {
+    fn component_for(&self, endpoint: EndpointId) -> Option<ComponentId> {
+        self.routes
+            .iter()
+            .find(|(_, source)| **source == endpoint)
+            .map(|(component, _)| *component)
+    }
+    fn source_for(&self, read: Read) -> Result<EndpointId> {
+        match read {
+            Read::Capabilities(CapabilityScope::Keyboard(_)) => Ok(self.primary),
+            Read::Battery(component)
+            | Read::Firmware(component)
+            | Read::Capabilities(CapabilityScope::Component(component)) => {
+                self.routes.get(&component).copied().ok_or_else(|| {
+                    BackendError::new(
+                        FailureKind::InvalidTarget,
+                        "toy protocol has no route for target",
+                    )
+                })
+            }
+        }
+    }
     fn capabilities(&self, _scope: CapabilityScope) -> Result<CapabilityReport> {
         let mut entries = match self.profile {
             Profile::Battery => vec![(Op::ReadBattery, Support::Supported)],
@@ -609,6 +648,11 @@ impl WireProtocol {
         channels: &mut LeaseSet,
         max_frame: usize,
     ) -> Poll<Result<ProtocolMessage>> {
+        let request_source = self
+            .pending
+            .as_ref()
+            .map(|pending| self.source_for(pending.read))
+            .transpose()?;
         if let Some(pending) = &mut self.pending
             && !pending.sent
         {
@@ -618,7 +662,7 @@ impl WireProtocol {
                 Read::Capabilities(_) => 0x12,
             };
             match channels
-                .channel(self.primary)?
+                .channel(request_source.expect("pending request source"))?
                 .poll_io(cx, IoRequest::SerialWrite(&[command]))
             {
                 Poll::Pending => return Poll::Pending,
@@ -641,7 +685,7 @@ impl WireProtocol {
             };
             let frame = &buffer[..size];
             if let [0xa0, level] = frame {
-                let Some(component) = self.event_component else {
+                let Some(component) = self.component_for(*source) else {
                     return Poll::Ready(Err(BackendError::new(
                         FailureKind::InvalidTarget,
                         "event has no configured component",
@@ -660,6 +704,58 @@ impl WireProtocol {
                     }),
                 }));
             }
+            let status = match frame {
+                [0xa1, level] => Some(DeviceObservation::Patch(
+                    crate::model::observation::DevicePatch::battery(
+                        Some(Observation::Known(
+                            Percentage::new(u16::from(*level)).map_err(|error| {
+                                BackendError::new(FailureKind::Protocol, "invalid partial battery")
+                                    .caused_by(error)
+                            })?,
+                        )),
+                        None,
+                    ),
+                )),
+                [0xa7, level] => Some(DeviceObservation::Battery(BatteryState {
+                    level: Observation::Known(Percentage::new(u16::from(*level)).map_err(
+                        |error| {
+                            BackendError::new(FailureKind::Protocol, "invalid battery event")
+                                .caused_by(error)
+                        },
+                    )?),
+                    charging: Observation::Known(ChargingState::Charging),
+                })),
+                [0xa4] => Some(DeviceObservation::Firmware(Observation::Known(
+                    FirmwareInfo::new(vec![
+                        ReportedVersion::new(VersionKind::Firmware, "synthetic/firmware", "event")
+                            .unwrap(),
+                    ])
+                    .unwrap(),
+                ))),
+                [0xae] => Some(DeviceObservation::Patch(
+                    crate::model::observation::DevicePatch::battery(
+                        Some(Observation::Unavailable(
+                            crate::model::observation::ReportedUnavailable::Sleeping,
+                        )),
+                        None,
+                    ),
+                )),
+                [0xaf] => Some(DeviceObservation::Patch(status_patch())),
+                _ => None,
+            };
+            if let Some(value) = status {
+                let component = self.component_for(*source).ok_or_else(|| {
+                    BackendError::new(
+                        FailureKind::InvalidTarget,
+                        "status frame has no configured component",
+                    )
+                })?;
+                return Poll::Ready(Ok(ProtocolMessage::Event {
+                    source: *source,
+                    component,
+                    value,
+                }));
+            }
             let Some(pending) = self.pending.take() else {
                 return Poll::Ready(Err(BackendError::new(
                     FailureKind::Protocol,
@@ -668,6 +764,17 @@ impl WireProtocol {
             };
             let value = match frame {
                 [0x90, level] => ReplyValue::Observation(battery(u16::from(*level))?),
+                [0x94, level] => ReplyValue::Observation(DeviceObservation::Patch(
+                    crate::model::observation::DevicePatch::battery(
+                        Some(Observation::Known(
+                            Percentage::new(u16::from(*level)).map_err(|error| {
+                                BackendError::new(FailureKind::Protocol, "invalid partial reply")
+                                    .caused_by(error)
+                            })?,
+                        )),
+                        None,
+                    ),
+                )),
                 [0x91, version @ ..] => {
                     let version = String::from_utf8(version.to_vec()).map_err(|error| {
                         BackendError::new(FailureKind::Protocol, "firmware version is not UTF-8")
@@ -717,6 +824,49 @@ impl WireProtocol {
         }
         Poll::Pending
     }
+}
+
+fn status_patch() -> crate::model::observation::DevicePatch {
+    use crate::model::observation::{
+        DeviceIndicator, DevicePatch, LightingZone, MeasurementTime, NamespacedId, Reachability,
+        Rgb,
+    };
+    // This fixed toy frame tests normalized status families, not a vendor schema.
+    DevicePatch::indicator(DeviceIndicator::CapsLock, Observation::Known(false))
+        .merge(DevicePatch::layers(Observation::Known(vec![])).unwrap())
+        .unwrap()
+        .merge(DevicePatch::lighting_enabled(
+            LightingZone::Component,
+            Observation::Known(false),
+        ))
+        .unwrap()
+        .merge(DevicePatch::brightness(
+            LightingZone::Component,
+            Observation::Known(Percentage::new(0).unwrap()),
+        ))
+        .unwrap()
+        .merge(DevicePatch::color(
+            LightingZone::Component,
+            Observation::Known(Rgb {
+                red: 0,
+                green: 0,
+                blue: 0,
+            }),
+        ))
+        .unwrap()
+        .merge(DevicePatch::effect(
+            LightingZone::Component,
+            Observation::Known(NamespacedId::new("toy/effect", "quiet").unwrap()),
+        ))
+        .unwrap()
+        .merge(DevicePatch::connection(Observation::Known(
+            Reachability::Sleeping,
+        )))
+        .unwrap()
+        .measured_at(MeasurementTime {
+            clock: NamespacedId::new("toy/clock", "ticks").unwrap(),
+            ticks: 17,
+        })
 }
 
 // Separate feature adapters deliberately omit unrelated protocol interfaces;

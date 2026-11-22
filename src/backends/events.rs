@@ -25,6 +25,18 @@ struct Queue {
 pub(super) struct Publisher(Arc<Mutex<Queue>>);
 pub(crate) struct EventReceiver(Arc<Mutex<Queue>>);
 
+pub(super) struct Publication {
+    pub(super) discarded: bool,
+    wake: Option<Waker>,
+}
+impl Publication {
+    pub(super) fn wake(self) {
+        if let Some(waker) = self.wake {
+            waker.wake();
+        }
+    }
+}
+
 pub(super) fn channel(capacity: usize, backend: String) -> Result<(Publisher, EventReceiver)> {
     if capacity == 0 {
         return Err(BackendError::new(
@@ -44,17 +56,24 @@ pub(super) fn channel(capacity: usize, backend: String) -> Result<(Publisher, Ev
 }
 
 impl Publisher {
-    pub(super) fn publish(&self, event: ObservationDelivery) {
+    /// Report every loss, including input after subscription termination: a read
+    /// can recover current data, but a subsequent discarded update invalidates it.
+    pub(super) fn publish(&self, event: ObservationDelivery) -> Publication {
+        let mut discarded = false;
         let wake = {
             let mut queue = self.0.lock().expect("event queue lock poisoned");
             if queue.ended {
-                return;
+                return Publication {
+                    discarded: true,
+                    wake: None,
+                };
             }
             if queue.items.len() == queue.capacity {
                 // Store control state outside the full queue: continuity loss
                 // must never be silently hidden behind dropped observations.
                 queue.items.clear();
                 queue.ended = true;
+                discarded = true;
                 queue.terminal = Some(
                     BackendError::new(
                         FailureKind::ResyncRequired,
@@ -73,9 +92,7 @@ impl Publisher {
             queue.waker.take()
         };
         // A waker may immediately re-enter a consumer; never call it under lock.
-        if let Some(waker) = wake {
-            waker.wake();
-        }
+        Publication { discarded, wake }
     }
     pub(super) fn finish(&self, error: Option<BackendError>) {
         let wake = {
@@ -99,6 +116,7 @@ impl EventReceiver {
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<ObservationDelivery>>> {
+        let next_waker = cx.waker().clone();
         let mut queue = self.0.lock().expect("event queue lock poisoned");
         if let Some(error) = queue.terminal.take() {
             return Poll::Ready(Some(Err(error)));
@@ -109,7 +127,9 @@ impl EventReceiver {
         if queue.ended {
             return Poll::Ready(None);
         }
-        queue.waker = Some(cx.waker().clone());
+        let old_waker = queue.waker.replace(next_waker);
+        drop(queue);
+        drop(old_waker);
         Poll::Pending
     }
     pub(crate) async fn next(&mut self) -> Option<Result<ObservationDelivery>> {
@@ -122,6 +142,8 @@ impl Drop for EventReceiver {
         let mut queue = self.0.lock().expect("event queue lock poisoned");
         queue.items.clear();
         queue.ended = true;
-        queue.waker = None;
+        let old_waker = queue.waker.take();
+        drop(queue);
+        drop(old_waker);
     }
 }

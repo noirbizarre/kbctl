@@ -181,6 +181,19 @@ impl ConnectContext {
     pub(crate) fn component_routes(&self) -> impl Iterator<Item = (ComponentId, EndpointId)> + '_ {
         self.routes.iter().map(|(id, route)| (*id, route.endpoint))
     }
+    pub(super) fn provenance(
+        &self,
+        reporter: &str,
+        component: ComponentId,
+    ) -> Result<crate::model::state::DeviceProvenance> {
+        let endpoint = self.component_source(component)?;
+        Ok(crate::model::state::DeviceProvenance {
+            reporter: reporter.into(),
+            session: self.id,
+            attachment: self.endpoints[&endpoint].token,
+            operation: self.routes[&component].token,
+        })
+    }
     pub(super) fn validates_replacement(&self, replacement: &Self) -> bool {
         replacement.id != self.id
             && replacement.endpoints.iter().all(|(id, binding)| {

@@ -12,6 +12,8 @@ mod cli;
 mod error;
 mod model;
 mod registry;
+mod runtime;
+mod state;
 mod transport;
 
 use cli::{Cli, Command};

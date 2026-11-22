@@ -12,6 +12,8 @@ pub(crate) mod capability;
 pub(crate) mod connection;
 pub(crate) mod identity;
 pub(crate) mod observation;
+pub(crate) mod state;
+pub(crate) mod time;
 pub(crate) mod topology;
 
 use identity::{ComponentId, EndpointId, KeyboardId, PhysicalDeviceId};
@@ -169,6 +171,12 @@ pub(crate) enum ModelError {
         help("Attach usage facts only to the HID collection that actually reported them.")
     )]
     UnexpectedHidMetadata { index: usize },
+    #[error("invalid normalized status value: {0}")]
+    #[diagnostic(
+        code(kbctl::model::invalid_status),
+        help("Supply a validated, backend-independent value; leave unreported fields absent.")
+    )]
+    InvalidStatus(&'static str),
 }
 
 #[cfg(test)]

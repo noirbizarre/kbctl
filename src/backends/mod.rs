@@ -6,6 +6,7 @@
 mod binding;
 pub(crate) mod error;
 pub(crate) mod events;
+mod observer;
 pub(crate) mod session;
 
 use std::{
@@ -27,8 +28,10 @@ use crate::{
     transport::LeaseSet,
 };
 
+pub(crate) use crate::model::time::Clock;
 pub(crate) use binding::ConnectContext;
 use error::{BackendError, FailureKind, Result};
+pub(crate) use observer::SessionObserver;
 pub(crate) use session::Session;
 
 pub(crate) type BackendFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
@@ -246,16 +249,6 @@ pub(crate) trait Backend: Send + Sync {
     ) -> BackendFuture<'_, Session>;
 }
 
-pub(crate) trait Clock: Send + Sync {
-    fn now(&self) -> Instant;
-}
-pub(crate) struct SystemClock;
-impl Clock for SystemClock {
-    fn now(&self) -> Instant {
-        Instant::now()
-    }
-}
-
 pub(crate) struct SessionOptions {
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) connect_deadline: Instant,
@@ -344,6 +337,7 @@ pub(crate) struct ObservationDelivery {
     source: EndpointId,
     component: ComponentId,
     value: DeviceObservation,
+    ingress: crate::model::time::IngressStamp,
 }
 impl ObservationDelivery {
     pub(crate) fn component(&self) -> ComponentId {
@@ -354,6 +348,9 @@ impl ObservationDelivery {
     }
     pub(crate) fn value(&self) -> &DeviceObservation {
         &self.value
+    }
+    pub(crate) fn ingress(&self) -> crate::model::time::IngressStamp {
+        self.ingress
     }
 }
 
@@ -384,5 +381,7 @@ impl PreparedRefresh {
 
 #[cfg(test)]
 mod fake;
+#[cfg(test)]
+mod state_tests;
 #[cfg(test)]
 mod tests;

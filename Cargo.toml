@@ -71,6 +71,8 @@ strip = true
 # favour of the project if `git tpl update` ever touches it.
 
 [dependencies]
+# Restart-safe opaque state epochs; std keeps OS entropy failures actionable.
+getrandom = { version = "0.4", features = ["std"] }
 # Errors & diagnostics. `thiserror` for typed errors inside the library,
 # `miette` to render them at the binary edge.
 thiserror = "2"

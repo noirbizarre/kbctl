@@ -53,10 +53,22 @@ runtime_id!(
     AttachmentGeneration,
     MembershipGeneration,
     CapabilityRefreshId,
-    BackendSessionId
+    BackendSessionId,
+    HostSourceId,
+    HostGeneration
 );
 
 impl BackendSessionId {
+    pub(crate) fn new() -> Result<Self> {
+        Self::allocate()
+    }
+}
+impl HostSourceId {
+    pub(crate) fn new() -> Result<Self> {
+        Self::allocate()
+    }
+}
+impl HostGeneration {
     pub(crate) fn new() -> Result<Self> {
         Self::allocate()
     }

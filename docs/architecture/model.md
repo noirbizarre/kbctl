@@ -69,7 +69,7 @@ must explicitly accept/revalidate plans before applying existing topology operat
 `KeyboardId`, `PhysicalDeviceId`, `InterfaceId`, `EndpointId` and `ComponentId` are distinct opaque types. A shared,
 checked process-global allocator never reuses a value, even across independent `Topology` instances or concurrent
 allocations. Exhaustion returns an error permanently rather than wrapping. Runtime IDs are not hardware identifiers
-or cross-process identifiers; the future service epoch will scope them in external snapshots.
+or cross-process identifiers; the [state service epoch](state.md) scopes committed snapshots externally.
 
 Rediscovering a retired unit creates new runtime IDs, even if its hardware evidence is identical. A still-present
 keyboard can retain its ID when one physical member reconnects. If its last member was retired, rediscovery creates
@@ -112,7 +112,7 @@ Renaming a keyboard or physical unit changes neither runtime identity nor hardwa
 with an `AttachmentGeneration`, or unavailable with a typed reason such as permission denial, busy channel,
 disconnection, suspend or protocol failure. Ready means the adapter validated the channel, not that every capability
 works or that normal typing is healthy. Capability support is tracked separately from channel availability.
-Issue #7 adds minimal typed battery/firmware observations; the full state store and freshness model remain future work.
+Issue #7 adds typed backend observations, extended by #9's [normalized state and freshness model](state.md).
 
 `revalidate_endpoint` issues a fresh generation, even for a previously ready endpoint. `invalidate_endpoint` makes
 all work from the previous ready attachment stale without removing physical hardware. Restored access requires
@@ -129,15 +129,20 @@ standalone check is not a concurrency transaction or a per-operation cancellatio
 component target, allowing keyboard-only backend bindings to reject stale attachment contexts.
 
 The [backend/session contract](backends.md) implements admitted-request cancellation, resource release and bounded
-backend event delivery. Scheduling, retries, access recovery, suspend orchestration, discovery reconciliation and
-committed snapshot/event publication remain host/application work described by [ADR 0004](adrs/0004-state-and-events.md).
+backend event delivery. Issue #9's runtime now owns coherent normalized updates, expiry and committed subscriptions.
+Scheduling, retries, actual access recovery and discovery collection remain host work; see
+[ADR 0004](adrs/0004-state-and-events.md).
 
-## Minimal status observations
+## Observed state and commits
 
-`model::observation` defines known/unknown/reported-unavailable values, validated percentages, partial battery state
-and firmware version facts for typed backend replies/events. A failed request stays an error, and unknown battery
-level is not zero. Session/source/target envelopes carry binding context for acceptance, not a full state/provenance
-store. Cached state, timestamps, freshness calculations and additional feature payloads belong to issue #9.
+`model::observation` defines successful reports and typed partial device patches. `model::state` wraps source-scoped
+fields in provenance, monotonic stamps, freshness, last-known data and failure facts. Host lock keys/entry points are
+distinct from device LEDs. Active layers, lighting, battery, firmware and reachability preserve unknown/unavailable
+values rather than filling defaults.
+
+The [runtime/state service](state.md) owns topology plus normalized writes and exposes immutable snapshot readers.
+Controlled actions reconcile lifecycle/removals and publish complete replacement records under epoch/revision cursors.
+Snapshots are self-contained; atomic bootstrap and bounded subscriptions permit explicit recovery after missed commits.
 
 ## Capability evidence
 

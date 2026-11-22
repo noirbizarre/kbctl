@@ -96,6 +96,9 @@ pub(crate) struct PhysicalDevice {
 }
 
 impl PhysicalDevice {
+    pub(crate) fn membership(&self) -> MembershipGeneration {
+        self.membership
+    }
     pub(crate) fn id(&self) -> PhysicalDeviceId {
         self.id
     }

@@ -5,6 +5,7 @@ implement the hardware-free contract for [issue #7](https://github.com/noirbizar
 machinery enforces ownership lifetime, request cancellation, bounded delivery and result binding. Synthetic protocols
 exercise that machinery. Issue #8 adds the separate [metadata registry](registry.md); no real keyboard protocol,
 OS opener, daemon or CLI device command is implemented.
+Issue #9 adds the [normalized runtime/state service](state.md) and source receipt/liveness integration described below.
 
 ## Boundaries
 
@@ -167,24 +168,38 @@ still answer supported reads, but reconnect is required to obtain a new receiver
 recover current information meanwhile. Session failure also has an out-of-band terminal error, while orderly close
 ends the receiver without queued stale observations. An already-ended/overflowed receiver remains ended.
 
-## Normalized observations and acceptance
+## Normalized observations, ingress and acceptance
 
-[`src/model/observation.rs`](../../src/model/observation.rs) provides the small shared foundation for #9:
+[`src/model/observation.rs`](../../src/model/observation.rs) provides the shared successful-report vocabulary:
 
 - `Observation<T>` distinguishes known, unknown and explicitly reported temporary unavailability.
 - `Percentage` validates 0..=100; battery level and charging state are independently partial.
 - `FirmwareInfo` reuses existing namespaced version facts and duplicate-key validation.
-- `DeviceObservation` currently carries battery or firmware information for a component.
+- `DeviceObservation` carries existing battery/firmware reports or a typed `DevicePatch` for partial indicator, layer,
+  lighting, battery, firmware and reachability status. Only existing battery/firmware request interfaces execute reads;
+  additional status producers can use unsolicited normalized patches without adding configuration commands.
 
 Unknown is not a zero battery. A successful device report of sleeping/missing/link-unavailable status differs from
-a failed transport query. Failed queries remain errors; unsupported remains a capability/dispatch result. No cached
-normalized state, observation timestamps, freshness calculation, desired state or feature schemas are introduced.
+a failed transport query. Failed queries remain errors; unsupported remains a capability/dispatch result.
+The [normalized state service](state.md) stores these reports with source provenance, timestamps, retained knowledge,
+freshness and commit semantics. Desired state and broader configuration payloads remain separate.
 
-`ObservationDelivery` records session, source and target with the typed value. `accept_observation` requires the
-current active session and validates the original binding's attachment and component tokens against `Topology`.
-The host must serialize that acceptance check with committing state. Never create a fresh token upon receipt of
-an old queued event: doing so could bless data from a removed component or prior attachment. Move-away/back and
-keyboard-only attachment bindings are also checked without inventing a component.
+`ObservationDelivery` records session, source, target and typed value, plus a checked session-local ingress sequence,
+host receipt instant and event/reply origin. Stamping happens inside the validated protocol pump, before queued events
+and returned replies diverge. Reversed consumption order cannot make an older event overwrite a newer same-field reply.
+Receipt-clock regression or sequence exhaustion terminates the session without emitting invalid observation metadata.
+
+`SessionObserver` shares immutable captured binding and out-of-band liveness, not handles or ownership authority.
+It can validate a delivery while another request holds `&mut Session`. Existing `accept_observation` delegates to it;
+the runtime combines observer validation with normalized publication. Never create a fresh token on receipt of an old
+queued event. Move-away/back and keyboard-only attachment bindings remain checked without inventing a component.
+
+Terminal liveness is recorded before teardown notification, including failure, cancellation, shutdown and drop.
+Input overflow also records its ingress boundary outside the queue. Runtime reconciliation stales affected evidence
+but does not treat a newer successful read as predating an old gap. The host must drive reconciliation and explicit
+expiry; observer changes do not secretly mutate published snapshots or introduce a scheduler.
+Further discarded input advances the loss boundary, including after receiver termination, so read recovery is not
+silently preserved across newer lost reports.
 
 For capabilities, the host uses `prepare_refresh`, performs async `query_capabilities` without borrowing topology,
 then calls `accept_capabilities` to validate and publish with #6's refresh token. On failure or cancellation it retains

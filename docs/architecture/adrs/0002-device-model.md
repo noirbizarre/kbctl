@@ -2,7 +2,7 @@
 
 Status: Accepted design; topology, identity and connection primitives implemented for issue #5, and capability
 metadata/cache for issue #6. Issue #7 implements [backend contracts and a fake-backed session lifecycle](../backends.md).
-Real hardware backends and application lifecycle integration remain pending.
+Real hardware backends remain pending; issue #9 implements normalized runtime/state reconciliation and subscriptions.
 Issue #8 implements a separate [metadata registry](../registry.md) with qualified source-backed identification and
 non-mutating topology plans; model identification does not establish operation support.
 
@@ -43,9 +43,9 @@ affect identity, availability and lifecycle. HID and USB serial are both require
 
 Assign distinct opaque runtime IDs to keyboards, physical devices, interfaces, endpoints and components. Never
 reuse them within the process lifetime, even across independent topology instances; rediscovery of retired instances
-allocates fresh IDs. The future service epoch scopes them externally. Public object paths derive from runtime IDs,
-never raw device nodes or serial numbers. Keep attachment generations separate so revalidation also rejects delayed
-work from an old handle without needing to retire hardware.
+allocates fresh IDs. The state service epoch scopes committed snapshots externally. Public object paths derive from
+runtime IDs, never raw device nodes or serial numbers. Keep attachment generations separate so revalidation also rejects
+delayed work from an old handle without needing to retire hardware.
 
 Persistently matching a physical keyboard is optional and evidence-based: use verified device/protocol identifiers
 when available, with an explicit confidence/ambiguity indication. VID/PID identifies a family, not an individual;

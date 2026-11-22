@@ -144,6 +144,7 @@ permission/busy retention and structural/context invalidation. Existing topology
 The [implemented backend contract](backends.md) publishes discovered reports through real refresh tokens, including
 supersession/abandonment and keyboard scopes without components. Its read interfaces use their driver's current
 interpreted support evidence; the topology cache remains the application's published view. Discovery scheduling,
-full normalized state, additional payloads, timestamps, snapshots and committed events remain separate work.
+additional command payloads and actual collection remain separate work. Issue #9 implements
+[observed state, freshness, snapshots and committed events](state.md) independently of capability-cache bookkeeping.
 See the [domain model](model.md),
 [ADR 0002](adrs/0002-device-model.md) and [ADR 0004](adrs/0004-state-and-events.md).

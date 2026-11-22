@@ -1,13 +1,14 @@
 # ADR 0004: Committed snapshots and bounded live events
 
-Status: Accepted design; implementation pending.
+Status: Accepted design; normalized runtime/store, expiry and internal subscriptions implemented for issue #9.
+Actual source collection, scheduling, daemon hosting and D-Bus adaptation remain pending.
 
 The [domain model](../model.md) implements topology retirement and attachment/target freshness checks for issue #5.
-The application service, observation application, committed snapshots and event delivery below remain planned work.
 Issue #6 also implements a topology-owned [capability cache](../capabilities.md) with refresh supersession and
 structural/attachment/context invalidation. That cache does not implement normalized-state snapshots or events.
 Issue #7 implements a separate [backend observation channel](../backends.md) with session-binding checks and bounded
-delivery. It is an input to the future application commit stream, not an implementation of its epoch/revision contract.
+delivery. Issue #9 now consumes it through the [normalized state service](../state.md), preserving source-scoped fields
+and common ingress ordering before serialized epoch/revision commits. The D-Bus bootstrap strategy below is still planned.
 
 ## Context
 
@@ -24,6 +25,10 @@ A snapshot contains `(epoch, revision, records)` representing one committed view
 `(epoch, revision, upserts, removals)` for one atomic commit; upserts contain complete replacement records.
 Observation timestamps are metadata, not ordering keys. Revisions establish software consistency, not simultaneous
 physical measurements across components.
+
+The implementation uses OS-random opaque epochs and a stable runtime-relative monotonic time domain. Checked revision
+rollover invalidates old subscriptions and publishes a complete initial record set under a new epoch. Per-leaf source
+sequences reject obsolete reports without discarding unrelated fields; these are separate from global commit revisions.
 
 ### Bootstrap and resynchronization
 
@@ -78,6 +83,11 @@ Endpoint unavailability alone does not retire the physical unit; the application
 The application must serialize freshness validation with observation application and add per-operation cancellation
 guards when it introduces cancellable work. Domain tokens alone do not implement the full cancellation policy.
 
+The runtime now supplies that normalized mutation seam. A read-only session observer exposes binding/liveness without
+holding a mutable I/O borrow, including terminal facts outside the input queue. Explicit reconciliation/expiry actions
+commit lifecycle staleness; current host lock records remain distinct from device indicators. The host is still
+responsible for scheduling actions and closing/reopening actual I/O resources.
+
 Retirement removes records from current snapshots and emits removals in the coherent stream and corresponding standard
 D-Bus interface-removal signals. Retain no unbounded disconnected-device history. Loss of one endpoint is not proof
 that every component of a multi-endpoint keyboard disappeared.
@@ -99,6 +109,7 @@ A client that sees revision 10 after revision 8 requests a fresh snapshot; it ne
 
 ## Consequences and follow-up
 
-Direct and daemon hosts share lifecycle semantics and can use the same scenario tests. Bounded queues may force a slow
-consumer to resynchronize, a deliberate resource trade-off. Implementation must test bootstrap races, overflow,
-removal during I/O and epoch changes; exact queue sizes, freshness deadlines and polling rates require backend evidence.
+Direct and daemon hosts can share the implemented runtime semantics. Bounded queues may force a slow consumer to
+resynchronize, a deliberate resource trade-off. Tests cover atomic bootstrap, overflow, removal/binding invalidation,
+explicit expiry and epoch changes. Exact queue sizes, freshness deadlines and polling rates remain caller policy
+requiring backend evidence; no background scheduler or durable replay is added.

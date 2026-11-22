@@ -1,6 +1,7 @@
 use std::{
     future::Future,
     pin::Pin,
+    sync::{Arc, Mutex},
     task::{Context, Poll},
     time::Instant,
 };
@@ -11,6 +12,7 @@ use crate::{
         connection::UnavailableReason,
         identity::{BackendSessionId, ComponentId, EndpointId},
         observation::{DeviceObservation, Observation},
+        time::{IngressOrigin, IngressStamp},
         topology::Topology,
     },
     transport::LeaseSet,
@@ -22,6 +24,7 @@ use super::{
     ProtocolMessage, ReplyValue, RequestId, SessionOptions, UpdateStrategy,
     error::{BackendError, FailureKind, Phase, Result},
     events::{self, EventReceiver, Publisher},
+    observer::{SessionLife, SessionObserver},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,7 +39,7 @@ pub(crate) enum SessionState {
 pub(crate) struct Session {
     backend: String,
     updates: UpdateStrategy,
-    context: ConnectContext,
+    context: Arc<ConnectContext>,
     driver: Box<dyn ProtocolDriver>,
     leases: Option<LeaseSet>,
     state: SessionState,
@@ -44,6 +47,9 @@ pub(crate) struct Session {
     publisher: Publisher,
     receiver: Option<EventReceiver>,
     next_request: u64,
+    next_observation: u64,
+    last_receipt: Option<Instant>,
+    life: Arc<Mutex<SessionLife>>,
 }
 
 impl std::fmt::Debug for Session {
@@ -106,7 +112,7 @@ impl Session {
             let session = Self {
                 backend,
                 updates,
-                context,
+                context: Arc::new(context),
                 driver,
                 leases: Some(leases),
                 state: SessionState::Connecting,
@@ -114,6 +120,14 @@ impl Session {
                 publisher,
                 receiver: Some(receiver),
                 next_request: 1,
+                next_observation: 1,
+                last_receipt: None,
+                life: Arc::new(Mutex::new(SessionLife {
+                    state: SessionState::Connecting,
+                    stopped_at: None,
+                    failure: None,
+                    gap: None,
+                })),
             };
             ConnectFuture {
                 session: Some(session),
@@ -134,6 +148,38 @@ impl Session {
     pub(crate) fn context(&self) -> &ConnectContext {
         &self.context
     }
+    pub(crate) fn observer(&self) -> SessionObserver {
+        SessionObserver {
+            context: self.context.clone(),
+            life: self.life.clone(),
+            backend: self.backend.clone(),
+        }
+    }
+
+    fn stamp(&mut self, origin: IngressOrigin) -> Result<IngressStamp> {
+        let received_at = self.options.clock.now();
+        if self.last_receipt.is_some_and(|last| received_at < last) {
+            return Err(self.error(
+                FailureKind::Protocol,
+                "host receipt clock regressed",
+                Phase::Events,
+            ));
+        }
+        let sequence = self.next_observation;
+        self.next_observation = sequence.checked_add(1).ok_or_else(|| {
+            self.error(
+                FailureKind::ResourceLimit,
+                "observation sequence exhausted",
+                Phase::Events,
+            )
+        })?;
+        self.last_receipt = Some(received_at);
+        Ok(IngressStamp {
+            sequence,
+            received_at,
+            origin,
+        })
+    }
 
     fn active(&self) -> Result<()> {
         if self.state != SessionState::Active {
@@ -152,6 +198,18 @@ impl Session {
     fn terminate(&mut self, state: SessionState, error: Option<BackendError>) {
         if matches!(self.state, SessionState::Active | SessionState::Connecting) {
             self.state = state;
+            // Publish loss of authority before releasing I/O; queued input must
+            // not become fresh merely because teardown is still in progress.
+            let mut life = self.life.lock().expect("session life lock poisoned");
+            life.state = state;
+            life.stopped_at = Some(
+                self.options.clock.now().max(
+                    self.last_receipt
+                        .unwrap_or_else(|| self.options.clock.now()),
+                ),
+            );
+            life.failure = error.as_ref().map(BackendError::kind);
+            drop(life);
             self.leases.take();
             self.publisher.finish(error);
         }
@@ -283,12 +341,18 @@ impl Session {
             )
             .context(&self.backend, Phase::Events, None, Some(source)));
         }
-        self.publisher.publish(ObservationDelivery {
+        let ingress = self.stamp(IngressOrigin::Event)?;
+        let publication = self.publisher.publish(ObservationDelivery {
             session: self.id(),
             source,
             component,
             value,
+            ingress,
         });
+        if publication.discarded {
+            self.life.lock().expect("session life lock poisoned").gap = Some(ingress);
+        }
+        publication.wake();
         Ok(())
     }
 
@@ -337,25 +401,7 @@ impl Session {
         topology: &Topology,
         delivery: &'a ObservationDelivery,
     ) -> Result<&'a DeviceObservation> {
-        self.active()?;
-        if delivery.session != self.id()
-            || self.context.component_source(delivery.component)? != delivery.source
-        {
-            return Err(self.error(
-                FailureKind::StaleResult,
-                "delivery belongs to another session or route",
-                Phase::Acceptance,
-            ));
-        }
-        self.context.validate_live(topology).map_err(|error| {
-            error.context(
-                &self.backend,
-                Phase::Acceptance,
-                None,
-                Some(delivery.source),
-            )
-        })?;
-        Ok(&delivery.value)
+        self.observer().accept(topology, delivery)
     }
 
     pub(crate) fn prepare_refresh(
@@ -429,7 +475,7 @@ impl Session {
     ) -> BackendFuture<'_, CapabilityDelivery> {
         let session = self.id();
         Box::pin(async move {
-            let (source, value) =
+            let (source, value, _) =
                 RequestFuture::new(self, Request::Capabilities(scope), deadline).await?;
             let ReplyValue::Capabilities(report) = value else {
                 unreachable!("validated reply kind");
@@ -458,7 +504,7 @@ impl BatteryRead for Session {
     ) -> BackendFuture<'_, ObservationDelivery> {
         let session = self.id();
         Box::pin(async move {
-            let (source, value) =
+            let (source, value, ingress) =
                 RequestFuture::new(self, Request::Battery(component), deadline).await?;
             let ReplyValue::Observation(value) = value else {
                 unreachable!("validated reply kind");
@@ -468,6 +514,7 @@ impl BatteryRead for Session {
                 source,
                 component,
                 value,
+                ingress: ingress.expect("observation was stamped inside pump"),
             })
         })
     }
@@ -480,7 +527,7 @@ impl FirmwareRead for Session {
     ) -> BackendFuture<'_, ObservationDelivery> {
         let session = self.id();
         Box::pin(async move {
-            let (source, value) =
+            let (source, value, ingress) =
                 RequestFuture::new(self, Request::Firmware(component), deadline).await?;
             let ReplyValue::Observation(value) = value else {
                 unreachable!("validated reply kind");
@@ -490,6 +537,7 @@ impl FirmwareRead for Session {
                 source,
                 component,
                 value,
+                ingress: ingress.expect("observation was stamped inside pump"),
             })
         })
     }
@@ -534,6 +582,11 @@ impl Future for ConnectFuture {
                     return Poll::Ready(Err(session.fail(error)));
                 }
                 session.state = SessionState::Active;
+                session
+                    .life
+                    .lock()
+                    .expect("session life lock poisoned")
+                    .state = SessionState::Active;
                 Poll::Ready(Ok(this.session.take().expect("connecting session")))
             }
         }
@@ -561,6 +614,19 @@ impl Request {
         }
     }
     fn accepts(self, value: &ReplyValue) -> bool {
+        if let ReplyValue::Observation(DeviceObservation::Patch(patch)) = value {
+            return patch.fields().keys().all(|field| match self {
+                Self::Battery(_) => matches!(
+                    field,
+                    crate::model::observation::DeviceField::BatteryLevel
+                        | crate::model::observation::DeviceField::BatteryCharging
+                ),
+                Self::Firmware(_) => {
+                    matches!(field, crate::model::observation::DeviceField::Firmware)
+                }
+                Self::Capabilities(_) => false,
+            });
+        }
         matches!(
             (self, value),
             (
@@ -574,6 +640,7 @@ impl Request {
     }
 }
 
+type RequestResult = (EndpointId, ReplyValue, Option<IngressStamp>);
 struct RequestFuture<'a> {
     session: &'a mut Session,
     request: Request,
@@ -664,7 +731,7 @@ impl<'a> RequestFuture<'a> {
             self.session.context.source_for(self.request.scope()).ok(),
         )
     }
-    fn fail(&mut self, error: BackendError) -> Poll<Result<(EndpointId, ReplyValue)>> {
+    fn fail(&mut self, error: BackendError) -> Poll<Result<RequestResult>> {
         self.done = true;
         let error = self.contextual(error);
         if self.admitted.is_some() {
@@ -676,7 +743,7 @@ impl<'a> RequestFuture<'a> {
 }
 
 impl Future for RequestFuture<'_> {
-    type Output = Result<(EndpointId, ReplyValue)>;
+    type Output = Result<RequestResult>;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         if this.session.options.clock.now() >= this.deadline {
@@ -743,8 +810,18 @@ impl Future for RequestFuture<'_> {
                             "decoded reply exceeds the message bound",
                         ));
                     }
+                    // Stamp before splitting the read result from queued events.
+                    // Consumers may drain those paths in the opposite order.
+                    let ingress = if matches!(value, ReplyValue::Observation(_)) {
+                        match session.stamp(IngressOrigin::Reply) {
+                            Ok(stamp) => Some(stamp),
+                            Err(error) => return this.fail(error),
+                        }
+                    } else {
+                        None
+                    };
                     this.done = true;
-                    return Poll::Ready(Ok((source, value)));
+                    return Poll::Ready(Ok((source, value, ingress)));
                 }
             }
         }
@@ -771,6 +848,7 @@ fn observation_size(value: &DeviceObservation) -> usize {
             })
         }
         DeviceObservation::Firmware(_) => 0,
+        DeviceObservation::Patch(patch) => patch.encoded_size(),
     }
 }
 fn reply_size(value: &ReplyValue) -> usize {
@@ -795,5 +873,49 @@ fn reply_size(value: &ReplyValue) -> usize {
                     })
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backends::{Clock, UpdateStrategy, fake::*};
+    use std::{task::Waker, time::Duration};
+
+    #[test]
+    fn observation_sequence_exhaustion_closes_the_session_without_wrapping_or_delivering_input() {
+        let rig = Rig::new(1, true);
+        let backend = FakeBackend::new(Profile::Both, UpdateStrategy::Push);
+        let mut session = rig.connect(&backend, rig.candidate(&backend));
+        let observer = session.observer();
+        session.next_observation = u64::MAX;
+        rig.wires[&rig.primary].push(vec![0xa0, 1]);
+        let Poll::Ready(Err(error)) = session.poll_drive(&mut Context::from_waker(Waker::noop()))
+        else {
+            panic!("exhaustion must be terminal");
+        };
+        assert_eq!(error.kind(), FailureKind::ResourceLimit);
+        assert_eq!(session.next_observation, u64::MAX);
+        assert_eq!(observer.life().state, SessionState::Failed);
+        rig.assert_released();
+    }
+
+    #[test]
+    fn a_regressing_backend_receipt_clock_is_rejected_before_a_new_observation_escapes() {
+        let rig = Rig::new(1, true);
+        let backend = FakeBackend::new(Profile::Both, UpdateStrategy::Push);
+        let mut session = rig.connect(&backend, rig.candidate(&backend));
+        let old = ready(session.read_battery(rig.component.unwrap(), rig.deadline())).unwrap();
+        rig.clock.rewind(Duration::from_secs(1));
+        let error =
+            ready(session.read_battery(rig.component.unwrap(), rig.deadline())).unwrap_err();
+        assert_eq!(error.kind(), FailureKind::Protocol);
+        assert_eq!(session.state(), SessionState::Failed);
+        assert_eq!(
+            session.observer().life().stopped_at,
+            Some(old.ingress().received_at)
+        );
+        assert!(session.observer().life().stopped_at.unwrap() > rig.clock.now());
+        rig.assert_released();
     }
 }
