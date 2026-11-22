@@ -40,14 +40,14 @@ fn main() -> ExitCode {
             command: DeviceCommand::Inspect { device },
         } => Operation::Inspect(device),
         Command::Indicator {
-            command: IndicatorCommand::Status,
-        } => Operation::Indicators,
+            command: IndicatorCommand::Status { device },
+        } => Operation::Indicators { device },
         Command::Indicator {
             command: IndicatorCommand::Watch,
         } => Operation::Watch,
         Command::Status => Operation::Status,
     };
-    let result = run(&operation, args.json);
+    let result = run(&operation, args.json, args.verbose > 0);
 
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -57,9 +57,11 @@ fn main() -> ExitCode {
             // exit code is chosen explicitly instead of inherited from
             // whatever the report wrapper decides.
             if args.json {
-                if let Err(render) =
-                    output::stdout(&output::Document::failure(&operation, &error), true)
-                {
+                if let Err(render) = output::stdout(
+                    &output::Document::failure(&operation, &error),
+                    true,
+                    args.verbose > 0,
+                ) {
                     if render.is_broken_pipe() {
                         return ExitCode::SUCCESS;
                     }
@@ -73,17 +75,17 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(operation: &Operation, json: bool) -> Result<()> {
+fn run(operation: &Operation, json: bool, detail: bool) -> Result<()> {
     #[cfg(target_os = "linux")]
     {
         let mut host = platform::linux::application::LinuxHost::new(operation)?;
         application::execute(&mut host, operation, |document| {
-            output::stdout(document, json)
+            output::stdout(document, json, detail)
         })
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (operation, json);
+        let _ = (operation, json, detail);
         Err(error::Error::UnsupportedPlatform)
     }
 }

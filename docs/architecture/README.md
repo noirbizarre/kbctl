@@ -23,6 +23,8 @@ Issue #12 adds [per-endpoint host indicator collection](../host-indicators.md), 
 fallback, typed per-lock availability, checked opens and the shared per-user ownership guard.
 Issue #34 adds the [read-only CLI](../cli.md) and shared application operations, with direct discovery/indicator hosting,
 human and versioned JSON output, and orderly watch shutdown.
+Issue #35 adds concise terminal views, qualified device selectors and conservative attachment-group indicator summaries,
+retaining endpoint facts and detailed inspection.
 
 ## Goals and boundaries
 

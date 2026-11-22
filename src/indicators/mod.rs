@@ -614,7 +614,7 @@ impl<O: Opener> Service<O> {
         Ok(out)
     }
 }
-fn candidate(endpoint: &InputEndpoint) -> bool {
+pub(crate) fn candidate(endpoint: &InputEndpoint) -> bool {
     matches!(
         endpoint.descriptor.keyboard,
         KeyboardClassification::Known { keyboard: true, .. }

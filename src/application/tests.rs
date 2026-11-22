@@ -40,6 +40,7 @@ struct Access {
     live: usize,
     denied: bool,
     unknown: bool,
+    uniform: Option<bool>,
     #[cfg(target_os = "linux")]
     owner: Option<Arc<crate::platform::linux::ownership::OwnerGuard>>,
 }
@@ -60,7 +61,12 @@ impl Opener for FakeOpener {
         access.opens += 1;
         if access.denied {
             return Err(AccessError {
-                path: endpoint.descriptor.devnode.known().unwrap().clone(),
+                path: endpoint
+                    .descriptor
+                    .devnode
+                    .known()
+                    .cloned()
+                    .unwrap_or_else(|| endpoint.descriptor.key.0.clone()),
                 operation: "open indicators",
                 kind: ErrorKind::Permission,
                 source: Some(io::Error::from(io::ErrorKind::PermissionDenied)),
@@ -69,7 +75,7 @@ impl Opener for FakeOpener {
         access.live += 1;
         Ok(FakeLease {
             access: self.0.clone(),
-            value: access.opens % 2 == 1,
+            value: access.uniform.unwrap_or(access.opens % 2 == 1),
         })
     }
 }
@@ -309,8 +315,18 @@ fn indicators_distinguish_true_false_unknown_unsupported_and_permission_denied()
         let mut host = FakeHost::new(scan(), true);
         host.access.borrow_mut().denied = denied;
         host.access.borrow_mut().unknown = unknown;
-        let documents = host.run(&Operation::Indicators);
+        let documents = host.run(&Operation::Indicators { device: None });
         let locks = locks(&documents[0]);
+        assert_eq!(
+            data(&documents[0])["indicators"]["devices"][0]["locks"]["caps_lock"]["state"],
+            if denied {
+                "permission_denied"
+            } else if unknown {
+                "unknown"
+            } else {
+                "known"
+            }
+        );
         assert_eq!(
             locks["caps_lock"]["state"],
             if denied {
@@ -374,6 +390,10 @@ fn watch_emits_initial_changes_expiry_resync_and_removal_then_closes_leases() {
         locks(&documents[1])["caps_lock"]["value"]
     );
     assert_eq!(locks(&documents[2])["caps_lock"]["state"], "stale");
+    assert_eq!(
+        data(&documents[2])["indicators"]["devices"][0]["locks"]["caps_lock"]["state"],
+        "stale"
+    );
     assert!(documents.iter().any(|d| d.event == "resync"));
     assert_eq!(
         data(documents.last().unwrap())["indicators"]["sources"],
@@ -415,41 +435,198 @@ fn idle_watch_cancellation_and_output_failure_both_retire_sources() {
 }
 
 #[test]
-fn human_and_json_render_the_same_failure_and_indicator_facts() {
+fn concise_and_detailed_views_preserve_indicator_meaning_and_json_keeps_raw_facts() {
     let mut host = FakeHost::new(scan(), true);
     let documents = host.run(&Operation::Status);
     let document = &documents[0];
     let json = serde_json::to_value(document).unwrap();
+    assert!(json.get("human_view").is_none());
     let mut text = vec![];
-    output::human(&mut text, document).unwrap();
+    output::human(
+        &mut text,
+        document,
+        output::HumanOptions {
+            detail: false,
+            width: 100,
+            color: false,
+        },
+    )
+    .unwrap();
     let text = String::from_utf8(text).unwrap();
-    fn check(value: &Value, text: &str) {
-        match value {
-            Value::Object(fields) => {
-                for (key, value) in fields {
-                    assert!(text.contains(&key.replace('_', " ")));
-                    check(value, text);
-                }
-            }
-            Value::Array(items) => {
-                for item in items {
-                    check(item, text);
-                }
-            }
-            Value::String(value) => assert!(
-                text.contains(
-                    &value
-                        .chars()
-                        .flat_map(|c| c.escape_debug())
-                        .collect::<String>()
-                )
-            ),
-            Value::Bool(value) => assert!(text.contains(&value.to_string())),
-            Value::Number(value) => assert!(text.contains(&value.to_string())),
-            Value::Null => assert!(text.contains("(not present)")),
-        }
+    assert!(text.contains("Caps Lock    on"));
+    assert!(text.contains("Num Lock     off"));
+    assert!(text.contains("Scroll Lock  unsupported"));
+    assert!(!text.contains("Capabilities"));
+    assert!(!text.contains("/sys/"));
+    assert_eq!(
+        json["data"]["indicators"]["sources"][0]["locks"]["caps_lock"]["value"],
+        true
+    );
+    assert!(json["data"]["devices"][0]["endpoints"][0]["capabilities"].is_object());
+    let mut detail = vec![];
+    output::human(
+        &mut detail,
+        document,
+        output::HumanOptions {
+            detail: true,
+            width: 100,
+            color: false,
+        },
+    )
+    .unwrap();
+    let detail = String::from_utf8(detail).unwrap();
+    for section in [
+        "Identity evidence",
+        "Capabilities",
+        "Endpoint",
+        "/sys/",
+        "Host source",
+    ] {
+        assert!(detail.contains(section));
     }
-    check(&json, &text);
+}
+
+#[test]
+fn canonical_selection_is_shared_by_inspection_and_both_indicator_output_formats() {
+    let fixture = crate::test_support::input::devices();
+    let listing = FakeHost::new(fixture.clone(), false).run(&Operation::Devices);
+    let listed = &data(&listing[0])["devices"][0];
+    let selector = listed["selector"]["id"].as_str().unwrap().to_owned();
+    let inspected =
+        FakeHost::new(fixture.clone(), false).run(&Operation::Inspect(selector.clone().into()));
+    assert_eq!(data(&inspected[0])["device"]["selector"]["id"], selector);
+    assert_ne!(data(&inspected[0])["device"]["id"], listed["id"]);
+    for chosen in [None, Some(selector.clone())] {
+        let documents = FakeHost::new(fixture.clone(), true).run(&Operation::Indicators {
+            device: chosen.clone(),
+        });
+        let value = data(&documents[0]);
+        let groups = value["indicators"]["devices"].as_array().unwrap();
+        assert_eq!(groups.len(), if chosen.is_some() { 1 } else { 2 });
+        assert_eq!(
+            value["indicators"]["sources"].as_array().unwrap().len(),
+            groups.len() * 2
+        );
+        let mut bytes = vec![];
+        output::human(
+            &mut bytes,
+            &documents[0],
+            output::HumanOptions {
+                detail: false,
+                width: 120,
+                color: false,
+            },
+        )
+        .unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+        assert_eq!(text.matches("Caps Lock").count(), groups.len());
+        for group in groups {
+            assert_eq!(group["locks"]["caps_lock"]["state"], "disagreement");
+            assert!(text.contains(group["selector"]["id"].as_str().unwrap()));
+        }
+        assert!(text.contains("disagreement (off, on)") || text.contains("disagreement (on, off)"));
+        assert!(!text.contains("Host source"));
+    }
+}
+
+#[test]
+fn agreeing_siblings_have_one_device_value_but_a_missing_candidate_prevents_unanimity() {
+    let mut host = FakeHost::new(many(2), true);
+    host.access.borrow_mut().uniform = Some(true);
+    host.initialize().unwrap();
+    let mut snapshot = host.reader().snapshot().unwrap();
+    let document = Document::view(
+        &Operation::Indicators { device: None },
+        "snapshot",
+        &snapshot,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        data(&document)["indicators"]["devices"][0]["locks"]["caps_lock"]["value"],
+        true
+    );
+    let key = snapshot
+        .records
+        .iter()
+        .find_map(|(key, record)| matches!(record.as_ref(), StateRecord::Host(_)).then_some(*key))
+        .unwrap();
+    snapshot.records.remove(&key);
+    let document = Document::view(
+        &Operation::Indicators { device: None },
+        "snapshot",
+        &snapshot,
+        &[],
+    )
+    .unwrap();
+    let caps = &data(&document)["indicators"]["devices"][0]["locks"]["caps_lock"];
+    assert_eq!(caps["state"], "mixed");
+    assert!(caps["value"].is_null());
+    assert!(
+        caps["contributing"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|o| o["state"] == "not_collected")
+    );
+    host.stop().unwrap();
+}
+
+#[test]
+fn indicator_selection_rejects_ambiguous_ids_names_and_event_locators() {
+    let mut fixture = crate::test_support::input::devices();
+    fixture.groups[1].serial = fixture.groups[0].serial.clone();
+    let listing = FakeHost::new(fixture.clone(), false).run(&Operation::Devices);
+    let devices = data(&listing[0])["devices"].as_array().unwrap();
+    let duplicate = devices[0]["selector"]["id"].as_str().unwrap();
+    assert_eq!(devices[0]["selector"]["ambiguous"], true);
+    for (query, matches) in [
+        (duplicate, 2),
+        ("Synthetic keyboard", 0),
+        ("/dev/input/event0", 0),
+    ] {
+        let mut host = FakeHost::new(fixture.clone(), true);
+        let operation = Operation::Indicators {
+            device: Some(query.into()),
+        };
+        let error = execute(&mut host, &operation, |_| Ok(())).unwrap_err();
+        assert!(matches!(error, Error::Selection { matches: found, .. } if found == matches));
+        let json = serde_json::to_value(Document::failure(&operation, &error)).unwrap();
+        assert_eq!(json["error"]["code"], "kbctl::cli::device_selection");
+        for device in devices {
+            assert!(
+                json["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains(device["selector"]["fallback"].as_str().unwrap())
+            );
+        }
+        assert!(host.stopped);
+    }
+}
+
+#[test]
+fn selected_device_diagnostics_keep_sysfs_fallbacks_when_event_metadata_is_missing() {
+    let mut fixture = crate::test_support::input::devices();
+    fixture.endpoints[0].devnode = Metadata::Missing;
+    let listing = FakeHost::new(fixture.clone(), false).run(&Operation::Devices);
+    let selector = data(&listing[0])["devices"][0]["selector"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let mut host = FakeHost::new(fixture, true);
+    host.access.borrow_mut().denied = true;
+    let documents = host.run(&Operation::Indicators {
+        device: Some(selector),
+    });
+    let problems = data(&documents[0])["problems"].as_array().unwrap();
+    assert_eq!(problems.len(), 2);
+    assert!(
+        problems
+            .iter()
+            .any(|p| p["path"] == "/sys/devices/unit0/input0/event0")
+    );
+    assert!(problems.iter().any(|p| p["path"] == "/dev/input/event1"));
 }
 
 #[cfg(target_os = "linux")]

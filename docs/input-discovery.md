@@ -16,6 +16,11 @@ live attachments, not persistent hardware identity. A replacement gets fresh IDs
 advertised serials do not merge independent attachments. These fingerprints are continuity evidence, not an infallible
 history through arbitrary monitoring outages. Uncertain instances are renewed after a coverage gap.
 
+The CLI derives separate [evidence-qualified selectors](cli.md#selector-evidence-and-persistence): USB IDs plus advertised
+serial when available, otherwise an explicitly locator-scoped attachment fallback. These do not change runtime identity,
+verify serial claims, establish chassis boundaries or merge groups. Grouped indicator summaries preserve disagreement
+and uncertainty across applicable sibling endpoints; raw observations remain endpoint-scoped.
+
 For known `BUS_USB` input devices, the nearest actual USB device ancestor groups sibling interfaces. The group describes
 a **shared host attachment**: a receiver is not proof that all its input nodes belong to one keyboard chassis. Other
 transports and virtual devices conservatively use their individual `inputN` parent; the common virtual-input root and

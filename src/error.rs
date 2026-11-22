@@ -27,16 +27,17 @@ pub(crate) enum Error {
     Ownership(#[from] crate::platform::linux::ownership::OwnershipError),
     // Selection remains part of the portable application contract, even without a platform host.
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-    #[error("no unique discovered device matches {} ({matches} matches)", selector.display())]
+    #[error("no unique discovered device matches {} ({matches} matches)\n{candidates}", selector.display())]
     #[diagnostic(
         code(kbctl::cli::device_selection),
         help(
-            "Run `kbctl device list` and use an exact current sysfs or /dev/input/event* path. Process-local IDs are not selectors; retry discovery if it is degraded."
+            "Run `kbctl device list` and use its device selector. For ambiguous advertised identity, use the attachment fallback shown below or in verbose listing. Attachment selectors and inspection paths are transient; process-local IDs are not selectors."
         )
     )]
     Selection {
         selector: std::path::PathBuf,
         matches: usize,
+        candidates: String,
     },
     #[cfg(not(target_os = "linux"))]
     #[error("host input discovery and indicator access are unsupported on this platform")]

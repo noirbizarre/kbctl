@@ -23,6 +23,11 @@ fn help_exposes_the_read_only_command_groups_and_json_flag() {
         .assert()
         .success()
         .stdout(predicate::str::contains("/dev/input/event0"));
+    kbctl()
+        .args(["indicator", "status", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--device").and(predicate::str::contains("--verbose")));
 }
 
 #[test]

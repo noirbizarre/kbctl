@@ -3,7 +3,7 @@
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
 use crate::{
-    application::Operation,
+    application::{Operation, devices::Catalog},
     error::{Error, Result},
     indicators::{AccessError, ErrorKind},
     model::{
@@ -17,6 +17,9 @@ use miette::Diagnostic;
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::{io::Write, path::Path};
+
+mod human;
+pub(crate) use human::{Options as HumanOptions, render as human};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub(crate) struct Notice {
@@ -61,6 +64,8 @@ impl Notice {
 
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct Document {
+    #[serde(skip)]
+    pub(crate) human_view: Option<human::View>,
     pub(crate) schema_version: u8,
     pub(crate) command: &'static str,
     pub(crate) event: &'static str,
@@ -77,6 +82,7 @@ pub(crate) struct Document {
 impl Document {
     pub(crate) fn failure(operation: &Operation, error: &Error) -> Self {
         Self {
+            human_view: None,
             schema_version: 1,
             command: operation.name(),
             event: "error",
@@ -96,11 +102,46 @@ impl Document {
         snapshot: &Snapshot,
         notices: &[Notice],
     ) -> Result<Self> {
+        let mut catalog = Catalog::new(snapshot);
+        let selected = match operation {
+            Operation::Inspect(selector) => Some(catalog.resolve(selector, true)?),
+            Operation::Indicators {
+                device: Some(selector),
+            } => Some(catalog.resolve(Path::new(selector), false)?),
+            _ => None,
+        };
+        let selected_group = selected.as_ref().map(|s| s.device.group.id);
+        let selected_endpoint = selected.as_ref().and_then(|s| s.endpoint);
+        catalog
+            .devices
+            .retain(|d| selected_group.is_none_or(|id| d.group.id == id));
+        let notices: Vec<_> = notices
+            .iter()
+            .filter(|notice| {
+                selected_group.is_none()
+                    || notice.code == "kbctl::input::discovery"
+                    || catalog.devices.iter().any(|d| {
+                        d.endpoints.iter().any(|e| {
+                            path(&e.endpoint.descriptor.key.0) == notice.path
+                                || e.endpoint
+                                    .descriptor
+                                    .devnode
+                                    .known()
+                                    .is_some_and(|p| path(p) == notice.path)
+                        })
+                    })
+            })
+            .cloned()
+            .collect();
         let groups: Vec<_> = snapshot
             .records
             .values()
             .filter_map(|r| match r.as_ref() {
-                StateRecord::InputDevice(group) => Some(group.as_ref()),
+                StateRecord::InputDevice(group)
+                    if selected_group.is_none_or(|id| group.id == id) =>
+                {
+                    Some(group.as_ref())
+                }
                 _ => None,
             })
             .collect();
@@ -108,22 +149,29 @@ impl Document {
             .records
             .values()
             .filter_map(|r| match r.as_ref() {
-                StateRecord::InputEndpoint(endpoint) => Some(endpoint.as_ref()),
+                StateRecord::InputEndpoint(endpoint)
+                    if selected_group.is_none_or(|id| endpoint.device == id) =>
+                {
+                    Some(endpoint.as_ref())
+                }
                 _ => None,
             })
             .collect();
-        let discovery = snapshot
+        let discovery_status = snapshot
             .records
             .values()
             .find_map(|r| match r.as_ref() {
-                StateRecord::InputDiscovery(status) => Some(discovery(status)),
+                StateRecord::InputDiscovery(status) => Some(status.clone()),
                 _ => None,
             })
-            .unwrap_or_else(|| discovery(&DiscoveryStatus::default()));
+            .unwrap_or_default();
+        let discovery = discovery(&discovery_status);
         let mut devices: Vec<_> = groups.iter().map(|group| {
+            let view = catalog.devices.iter().find(|d| d.group.id == group.id).expect("catalog includes each input group");
             let mut members: Vec<_> = endpoints.iter().filter(|e| e.device == group.id).map(|e| endpoint(e)).collect();
             members.sort_by(|a, b| a["syspath"].as_str().cmp(&b["syspath"].as_str()));
             json!({"id": group.id.to_string(), "syspath": path(&group.descriptor.key.0),
+                "display_name": view.name, "selector": view.selector, "grouping": view.grouping,
                 "usb": metadata(&group.descriptor.usb, |usb| json!({"vendor": usb.vendor, "product": usb.product})),
                 "serial": metadata(&group.descriptor.serial, |s| json!(s)),
                 "identification": match &group.descriptor.identification {
@@ -136,6 +184,7 @@ impl Document {
         let mut indicators: Vec<_> = snapshot.records.values().filter_map(|record| {
             let StateRecord::Host(host) = record.as_ref() else { return None };
             let endpoint = endpoints.iter().find(|e| Some(e.id) == host.input);
+            if selected_group.is_some() && endpoint.is_none() { return None; }
             Some(json!({"source_id": host.id.to_string(), "generation": host.generation.to_string(),
                 "scope": {"namespace": host.scope.namespace(), "value": host.scope.value()},
                 "endpoint_id": host.input.map(|id| id.to_string()),
@@ -148,44 +197,22 @@ impl Document {
                      "num_lock": host_field(host, HostLock::Num), "scroll_lock": host_field(host, HostLock::Scroll)}}))
         }).collect();
         indicators.sort_by(|a, b| a["syspath"].as_str().cmp(&b["syspath"].as_str()));
-        let indicator_data = json!({"scope": "per_endpoint_kernel_state", "sources": indicators,
+        let grouped: Vec<_> = catalog.devices.iter().filter(|d| d.has_indicators() || selected_group.is_some()).map(|d| json!({
+            "device_id": d.group.id.to_string(), "display_name": d.name, "selector": d.selector, "grouping": d.grouping,
+            "endpoint_ids": d.endpoints.iter().filter(|e| e.eligible || e.host.is_some()).map(|e| e.endpoint.id.to_string()).collect::<Vec<_>>(),
+            "locks": {"caps_lock": d.lock(HostLock::Caps), "num_lock": d.lock(HostLock::Num), "scroll_lock": d.lock(HostLock::Scroll)}
+        })).collect();
+        let indicator_data = json!({"scope": "per_endpoint_kernel_state", "sources": indicators, "devices": grouped,
             "collection": if indicators.is_empty() { "no_sources" } else { "observed" }});
         let data = match operation {
             Operation::Devices => {
                 json!({"discovery": discovery, "devices": devices, "problems": notices})
             }
-            Operation::Inspect(selector) => {
-                let mut matches = vec![];
-                for group in &groups {
-                    let selected: Vec<_> = endpoints
-                        .iter()
-                        .filter(|e| {
-                            e.device == group.id
-                                && (e.descriptor.key.0 == *selector
-                                    || e.descriptor.devnode.known().is_some_and(|p| p == selector))
-                        })
-                        .collect();
-                    if group.descriptor.key.0 == *selector {
-                        matches.push((*group, None));
-                    }
-                    for endpoint in selected {
-                        matches.push((*group, Some(endpoint.id)));
-                    }
-                }
-                if matches.len() != 1 {
-                    return Err(Error::Selection {
-                        selector: selector.clone(),
-                        matches: matches.len(),
-                    });
-                }
-                let (group, selected) = matches[0];
-                let device = devices
-                    .into_iter()
-                    .find(|d| d["id"] == group.id.to_string())
-                    .expect("rendered group");
-                json!({"discovery": discovery, "device": device, "selected_endpoint_id": selected.map(|id| id.to_string()), "problems": notices})
+            Operation::Inspect(_) => {
+                let device = devices.into_iter().next().expect("resolved device");
+                json!({"discovery": discovery, "device": device, "selected_endpoint_id": selected_endpoint.map(|id| id.to_string()), "problems": notices})
             }
-            Operation::Indicators | Operation::Watch => {
+            Operation::Indicators { .. } | Operation::Watch => {
                 json!({"discovery": discovery, "indicators": indicator_data, "problems": notices})
             }
             Operation::Status => {
@@ -197,6 +224,13 @@ impl Document {
             }
         };
         Ok(Self {
+            human_view: Some(human::View {
+                devices: catalog.devices,
+                discovery: discovery_status,
+                notices,
+                selected_endpoint,
+                selected: selected_group.is_some(),
+            }),
             schema_version: 1,
             command: operation.name(),
             event,
@@ -348,7 +382,7 @@ fn field(field: Option<&FieldState<bool>>) -> Value {
         "last_known": field.last_known.as_ref().map(|s| json!({"value": s.value, "stamp": stamp(&s.stamp)}))})
 }
 
-pub(crate) fn stdout(document: &Document, json: bool) -> Result<()> {
+pub(crate) fn stdout(document: &Document, json: bool, detail: bool) -> Result<()> {
     if json {
         // The library owns destination/color policy, including FORCE_COLOR and NO_COLOR handling.
         console_json::write_json_stdout(document)?;
@@ -357,60 +391,10 @@ pub(crate) fn stdout(document: &Document, json: bool) -> Result<()> {
             .and_then(|()| out.flush())
             .map_err(|e| Error::io("finish JSON output", e))
     } else {
-        human(&mut std::io::stdout().lock(), document)
+        human(
+            &mut std::io::stdout().lock(),
+            document,
+            HumanOptions::stdout(detail),
+        )
     }
-}
-
-pub(crate) fn human(writer: &mut impl Write, document: &Document) -> Result<()> {
-    writeln!(writer, "{} ({})", document.command, document.event)
-        .map_err(|e| Error::io("write output", e))?;
-    // Render the common presentation tree so new facts cannot silently disappear from one format.
-    let value = serde_json::to_value(document).expect("presentation documents are serializable");
-    human_value(writer, &value, 0)
-        .and_then(|()| writer.flush())
-        .map_err(|e| Error::io("write output", e))
-}
-fn human_value(writer: &mut impl Write, value: &Value, depth: usize) -> std::io::Result<()> {
-    match value {
-        Value::Object(fields) => {
-            for (name, value) in fields {
-                write!(
-                    writer,
-                    "{:width$}{}:",
-                    "",
-                    name.replace('_', " "),
-                    width = depth
-                )?;
-                if value.is_object() || value.is_array() {
-                    writeln!(writer)?;
-                    human_value(writer, value, depth + 2)?;
-                } else {
-                    write!(writer, " ")?;
-                    human_value(writer, value, 0)?;
-                }
-            }
-        }
-        Value::Array(items) if items.is_empty() => {
-            writeln!(writer, "{:width$}(none)", "", width = depth)?
-        }
-        Value::Array(items) => {
-            for item in items {
-                writeln!(writer, "{:width$}-", "", width = depth)?;
-                human_value(writer, item, depth + 2)?;
-            }
-        }
-        // Escape terminal control characters in untrusted device labels and paths, without quoting ordinary labels.
-        Value::String(text) => writeln!(
-            writer,
-            "{:width$}{}",
-            "",
-            text.chars()
-                .flat_map(|c| c.escape_debug())
-                .collect::<String>(),
-            width = depth
-        )?,
-        Value::Null => writeln!(writer, "{:width$}(not present)", "", width = depth)?,
-        scalar => writeln!(writer, "{:width$}{scalar}", "", width = depth)?,
-    }
-    Ok(())
 }

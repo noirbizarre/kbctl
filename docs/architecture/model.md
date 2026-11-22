@@ -100,6 +100,11 @@ USB VID/PID, names, left/right labels, enumeration order, USB port paths and tra
 hardware identities. Identical metadata never automatically groups units. Keep unstable locators in `EndpointLocator`,
 not verified identity claims.
 
+The application catalog adds [CLI selectors](../cli.md#selector-evidence-and-persistence), separate from runtime and
+verified hardware identity. USB VID/PID plus advertised serial can provide an evidence-qualified persistent selector;
+missing evidence uses an explicit attachment-locator fallback. Neither grants reconciliation/pairing authority. Duplicate
+claims remain ambiguous and do not merge attachment groups; digest collisions are also rejected during resolution.
+
 ### Human-readable names
 
 `DisplayName` rejects blank text. Optional discovery names receive deterministic fallbacks such as `Unknown keyboard`,

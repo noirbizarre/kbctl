@@ -63,3 +63,31 @@ pub(crate) fn failure() -> Problem {
         os_code: Some(13),
     }
 }
+
+/// Independent advertised units with two input siblings each; equal labels never imply pairing.
+pub(crate) fn devices() -> Scan {
+    let template = scan();
+    let mut result = Scan {
+        groups: vec![],
+        endpoints: vec![],
+        complete: true,
+        problems: vec![],
+    };
+    for unit in 0..2 {
+        let mut group = template.groups[0].clone();
+        group.key = DiscoveryKey(format!("/sys/devices/unit{unit}").into());
+        group.serial = Metadata::Known(format!("unit-{unit}"));
+        result.groups.push(group.clone());
+        for sibling in 0..2 {
+            let index = unit * 2 + sibling;
+            let mut endpoint = template.endpoints[0].clone();
+            endpoint.group = group.key.clone();
+            endpoint.key =
+                DiscoveryKey(format!("/sys/devices/unit{unit}/input{index}/event{index}").into());
+            endpoint.devnode = Metadata::Known(format!("/dev/input/event{index}").into());
+            endpoint.incarnation.as_mut().unwrap().inode = index + 2;
+            result.endpoints.push(endpoint);
+        }
+    }
+    result
+}

@@ -8,26 +8,55 @@ diagnostic. Management protocol backends and D-Bus integration are separate work
 
 ```sh
 kbctl device list
-kbctl device inspect /dev/input/event0
-kbctl device inspect /sys/devices/synthetic-usb
+kbctl device inspect usb-15ac7a64ff726c151efde8b1cbf1218e
 kbctl indicator status
+kbctl indicator status --device usb-15ac7a64ff726c151efde8b1cbf1218e
+kbctl --verbose indicator status
 kbctl indicator watch
 kbctl status
 kbctl --json device list
 kbctl indicator watch --json
 ```
 
-The sysfs example is illustrative; use a path actually printed by `device list`.
+The example selector is synthetic; copy an ID actually printed by `device list`.
 
-`device list` includes every discovered input group, its endpoints, classification evidence, registry identification,
-metadata and discovery health. Non-keyboard groups and unknown classifications remain visible. `device inspect` accepts
-an exact group sysfs path, endpoint sysfs path or known event-node path and returns the group context and, when an
-endpoint was selected, its ID. Missing or ambiguous matches are errors. These paths are current OS locators and can be
-reused after unplugging. IDs are process-local correlation values, not persistent selectors or hardware identities.
+`device list` shows a compact NAME / ID / PATH table, grouping sibling endpoints rather than repeating kernel nodes.
+The path is a current locator; `(+N)` counts additional endpoints. Non-keyboard groups and unknown classifications remain
+visible. Narrow terminals use stacked rows, keeping selectors complete for copying. For example:
+
+```text
+NAME                ID                                    PATH
+Synthetic keyboard  usb-15ac7a64ff726c151efde8b1cbf1218e  /dev/input/event0 (+1)
+```
+
+`--verbose` (or `-v`) expands list/status/watch with endpoint and metadata diagnostics. `device inspect` is always detailed,
+with identity evidence, grouping/runtime identity, endpoint locators, classification, kernel identifiers and capabilities
+in named sections. It accepts canonical IDs and attachment fallbacks. Exact group/endpoint sysfs paths and event-node
+paths remain accepted for transient inspection, for example `kbctl device inspect /dev/input/event0`. They are not
+persistent selectors. Human names and process-local runtime IDs are not accepted as selectors; names need not be unique.
+Missing or ambiguous selection is an actionable error rather than selecting the first match.
+
+### Selector evidence and persistence
+
+- `usb-<32 hex digits>` uses the USB vendor/product IDs and a nonblank **advertised** serial. It stays the same across
+  disconnect/reconnect, port changes and event-node renumbering while that evidence remains the same. It is not verified
+  unit identity, evidence of ownership, or permission to pair devices. Case and spaces in the serial are significant.
+- `attachment-<32 hex digits>` is the explicit fallback when USB/serial evidence is absent, blank or failed. It derives
+  from the current group sysfs locator and has **no reconnect-stability or hardware-uniqueness guarantee**. The same path
+  can later refer to another device. A fallback is also available for every advertised selector via inspect/verbose output.
+- Duplicate advertised identities remain separate attachments with an ambiguous canonical ID. Use their attachment
+  fallbacks for a current query. Duplicate IDs or shortened-digest collisions never silently resolve to one device.
+  Ambiguity is relative to the current inventory; incomplete discovery cannot establish global uniqueness.
+
+Selector derivation v1 is deterministic: SHA-256 over `kbctl/selector/v1/usb` followed by a zero byte, then three fields,
+each prefixed with its unsigned 64-bit big-endian byte length. Fields are the two-byte big-endian vendor ID, two-byte
+big-endian product ID, and exact UTF-8 serial. The first 16 digest bytes become lowercase hex after `usb-`. Fallbacks use
+the namespace `kbctl/selector/v1/attachment` and one field containing the current locator's OS-encoded bytes, prefixed
+in the same way. Runtime IDs, names, event-node paths and enumeration order never enter the advertised selector.
 
 Device commands use metadata only: event-stream access is **not checked** and no indicator node is opened. Indicator
 commands collect from known keyboard endpoints or endpoints advertising standard lock LEDs, following the existing
-collector's candidate policy. Global `status` combines discovery, devices, per-endpoint indicators and an explicit
+collector's candidate policy. Global `status` combines discovery, devices, grouped indicators and an explicit
 management summary; it does not start management-backend sessions or claim that device discovery creates logical
 programmable keyboards.
 
@@ -35,6 +64,18 @@ programmable keyboards.
 
 Each endpoint independently reports Caps Lock, Num Lock and Scroll Lock. Endpoints can disagree. Kernel-maintained LED
 state does not establish desktop-global lock state, physical LED illumination or firmware state. There are no writes.
+
+Default human output gives a separate view for each eligible input attachment, with `on`/`off` only when all applicable
+endpoints have fresh, known and agreeing values. Conflicting known values show `disagreement`. Known readings alongside
+unknown, unavailable, uncollected, stale or unsupported siblings show `mixed`, with contributing states. Uniform uncertain
+or failed states retain their names. `--verbose` shows the endpoint values, availability and freshness behind each summary.
+An explicitly selected device without eligible sources reports `not collected`, not `off` or `unsupported`.
+
+Groups are the existing discovery attachments, **not verified keyboard chassis**: a USB receiver can expose several
+devices, and unreadable grouping evidence remains uncertain. KBCTL labels this scope and never merges independent
+attachments by names or serials. `--device` on indicator status selects the same canonical/fallback ID shown by device
+discovery, restricting both human and JSON results; current paths and names are not accepted for this option. Collection
+still follows the shared collector's candidate policy and ownership boundary; selection is a result filter.
 
 Known values, unknown values, unsupported locks, unavailable sources, permission denials, errors and stale observations
 are explicit. Read the lock's `state`, `quality`, source availability, `failure` and `source_failure` alongside `value`.
@@ -53,8 +94,10 @@ SIGTERM or output failure. Snapshot fallback samples periodically and can miss c
 
 ## Output contract (schema version 1)
 
-Human output is an indented, labeled view of the same presentation facts used by JSON, including metadata and failure
-details. `--json` is global and may appear before or after a subcommand. JSON rendering uses
+Human output uses concise command-specific views, restrained terminal color and explicit state words; diagnostics remain
+understandable without color. `--verbose` adds detail; `RUST_BACKTRACE` expands errors without changing successful output.
+`--json` is global and may appear before or after a subcommand. It always retains full metadata regardless of verbosity.
+JSON rendering uses
 [`console-json`](https://github.com/noirbizarre/console-json); that library owns terminal detection and color policy.
 
 - Terminal: pretty JSON, with colors when the library detects support.
@@ -68,7 +111,8 @@ Every document contains `schema_version: 1`, `command` (for example `device.list
 contain `cursor`, `time_domain` and `data`. Cursors contain an opaque hex epoch and revision; they order state within a
 running service, not independent CLI invocations. All `*_ms` timestamps are monotonic milliseconds from runtime startup
 in the named `time_domain`, not Unix timestamps. Collections of devices/endpoints/sources are ordered by sysfs path.
-Treat IDs and epochs as opaque strings. Unknown/missing metadata is a tagged object, never an unexplained null.
+Treat runtime IDs, selectors and epochs as separate opaque strings. Unknown/missing metadata is a tagged object, never an
+unexplained null.
 Nullable report, value and last-known members indicate absence within an explicitly tagged lock/source state.
 
 Command data members:
@@ -87,6 +131,17 @@ with discovery health. Each source has endpoint locators, scope, availability an
 `caps_lock`, `num_lock`, `scroll_lock`. Field reports retain provenance, sequence, validity and freshness deadlines.
 `problems` preserves collector diagnostics, including initialization/fallback warnings; it describes the most recent
 host turn (all initial collection turns for a one-shot query). Continuing source/metadata failures also live in state.
+
+Device records additionally include `display_name`, qualified `selector` metadata (`id`, `kind`, `verification`,
+`ambiguous`, `fallback`, `fallback_ambiguous`, `reason`) and `grouping`. `usb_serial` means advertised evidence;
+`attachment` means locator-scoped fallback. `grouping` is `usb_attachment`, `input_attachment` or `uncertain_attachment`,
+never a claim of chassis identity. Existing numeric-string `id` fields remain process-local.
+
+`indicators.devices` adds per-attachment summaries, referencing `device_id` and contributing `endpoint_ids`, plus the same
+name/selector/grouping fields. Each lock has `state`, nullable `value` and distinct `contributing` state/value pairs.
+Only unanimously fresh known observations produce a non-null summary boolean. Mixed, disagreement and other uncertain
+summaries have null values; raw endpoint reports and history remain unchanged in `indicators.sources`. Existing schema-v1
+fields and endpoint scope are preserved. Grouped summaries use selector order; existing arrays retain sysfs-path ordering.
 
 Fatal failures produce `event: "error"` and an `error` object with stable diagnostic `code`, `message` and actionable
 `help`, rather than `data`. For example, with unset runtime storage:

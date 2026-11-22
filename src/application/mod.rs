@@ -24,11 +24,13 @@ use crate::{
     state::{StateReader, subscription::ResyncReason},
 };
 
+pub(crate) mod devices;
+
 #[derive(Clone, Debug)]
 pub(crate) enum Operation {
     Devices,
     Inspect(PathBuf),
-    Indicators,
+    Indicators { device: Option<String> },
     Watch,
     Status,
 }
@@ -37,13 +39,13 @@ impl Operation {
         match self {
             Self::Devices => "device.list",
             Self::Inspect(_) => "device.inspect",
-            Self::Indicators => "indicator.status",
+            Self::Indicators { .. } => "indicator.status",
             Self::Watch => "indicator.watch",
             Self::Status => "status",
         }
     }
     pub(crate) fn collects_indicators(&self) -> bool {
-        matches!(self, Self::Indicators | Self::Watch | Self::Status)
+        matches!(self, Self::Indicators { .. } | Self::Watch | Self::Status)
     }
 }
 

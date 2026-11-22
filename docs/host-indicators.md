@@ -7,8 +7,10 @@ snapshots and changes use its atomic snapshot/subscription API. The [CLI](cli.md
 ## Reporting scope and outcomes
 
 Each collected input endpoint has its own host source, with a typed `InputEndpointId` binding and scope namespace
-`linux.evdev.indicators` with the endpoint ID as its value. IDs are process-local. Two endpoints can disagree; KBCTL does
-not elect a system-wide, seat-wide or compositor-wide winner, merge receiver siblings, or copy values into device LED state.
+`linux.evdev.indicators` with the endpoint ID as its value. IDs are process-local. Two endpoints can disagree; the runtime
+does not elect a system-wide, seat-wide or compositor-wide winner, merge receiver siblings, or copy values into device LED
+state. The CLI adds conservative attachment-group summaries: only fresh, known agreement becomes on/off; disagreement
+and mixed evidence remain explicit, with endpoint details available through `--verbose` and JSON.
 
 Linux `EVIOCGLED` reports the input device's kernel-maintained indicator bitmap. It is **not** proof of physical LED
 illumination, keyboard firmware state or the active desktop input context. No indicator writes, keymap queries, live key

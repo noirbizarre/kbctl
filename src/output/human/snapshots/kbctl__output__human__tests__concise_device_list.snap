@@ -1,0 +1,9 @@
+---
+source: src/output/human/tests.rs
+expression: output
+---
+NAME                ID                                    PATH
+Synthetic keyboard  usb-15ac7a64ff726c151efde8b1cbf1218e  /dev/input/event0 (+1)
+Synthetic keyboard  usb-a26a78c62870ea363cdb37e5109dc772  /dev/input/event2 (+1)
+Rows are input attachments, not verified chassis; (+N) counts extra endpoints.
+usb-* IDs use advertised USB serial evidence, not verified unit identity.
