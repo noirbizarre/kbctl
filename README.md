@@ -53,6 +53,15 @@ On Linux, device commands discover input metadata; indicator commands read Caps 
 eligible endpoint. JSON is colored and pretty on supported terminals, compact and uncolored when piped. Watch emits an
 initial snapshot followed by updates until Ctrl-C. See the [CLI guide](docs/cli.md) for selectors, output and exit codes.
 
+### Host lock state vs. keyboard LED state
+
+KBCTL distinguishes two related but different things:
+
+- **Host lock state** is the logical Caps Lock, Num Lock or Scroll Lock state maintained by the operating system. Changing it affects the host and may affect more than one keyboard.
+- **Keyboard LED state** is the physical indicator state reported by, or controllable on, an individual keyboard. It belongs to that device and can differ from the host's logical state.
+
+These states often stay synchronized, but they are not interchangeable. A command that changes the host lock state does not necessarily target a particular keyboard's LED, and changing a device LED does not necessarily change the host's logical lock state. KBCTL keeps the two operations separate so scripts and desktop widgets can choose the intended behavior explicitly. Per-device LED control with `get`, `set` and `toggle` is tracked in [issue #36](https://github.com/noirbizarre/kbctl/issues/36); host lock-state control is tracked separately in [issue #13](https://github.com/noirbizarre/kbctl/issues/13).
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
