@@ -115,6 +115,8 @@ jobs:
           pattern: asset-*
           merge-multiple: true
           path: dist
+      # Metadata generation builds the package natively, outside the cross images.
+      - uses: ./.github/actions/setup-linux-input
       # Generate host-independent text once, rather than executing cross-compiled binaries.
       - uses: dtolnay/rust-toolchain@stable
       - uses: jdx/mr-boxington-action@v1

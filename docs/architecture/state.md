@@ -3,8 +3,9 @@
 Issue [#9](https://github.com/noirbizarre/kbctl/issues/9) implements a private, backend-independent observed-state
 model and commit service. [`runtime::Runtime`](../../src/runtime/mod.rs) owns topology and is the exclusive normalized
 writer. [`state::StateReader`](../../src/state/mod.rs) supplies immutable snapshots and atomic live subscriptions.
-The CLI is not wired to this service yet; actual Linux collection, hardware protocols, scheduling, D-Bus and persistence
-remain host/integration work.
+The CLI is not wired to this service yet; indicator collection, hardware protocols, hosting, D-Bus and persistence
+remain integration work. Issue #11 adds [Linux input metadata discovery](../input-discovery.md) and runtime-owned input
+group/endpoint/discovery-status records, sharing these same snapshots and commits without creating logical keyboards.
 
 ## Status vocabulary
 

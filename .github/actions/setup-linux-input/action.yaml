@@ -1,0 +1,8 @@
+name: Linux input build dependencies
+description: Install this project's metadata discovery bindings' native build prerequisites
+runs:
+  using: composite
+  steps:
+    - name: Install libudev development files
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends pkg-config libudev-dev

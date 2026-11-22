@@ -11,8 +11,8 @@ use thiserror::Error;
 use super::{
     connection::{AttachmentToken, ConnectionState, OperationToken, TransportKind},
     identity::{
-        BackendSessionId, ComponentId, EndpointId, HostGeneration, HostSourceId, InterfaceId,
-        KeyboardId, MembershipGeneration, PhysicalDeviceId,
+        BackendSessionId, ComponentId, EndpointId, HostGeneration, HostSourceId, InputDeviceId,
+        InputEndpointId, InterfaceId, KeyboardId, MembershipGeneration, PhysicalDeviceId,
     },
     observation::{DeviceField, HostLock, MeasurementTime, NamespacedId, Observation, StatusValue},
     time::{IngressOrigin, Timestamp},
@@ -341,6 +341,9 @@ pub(crate) enum RecordKey {
     Session(BackendSessionId),
     Host(HostSourceId),
     Device(ComponentId, EndpointId),
+    InputDevice(InputDeviceId),
+    InputEndpoint(InputEndpointId),
+    InputDiscovery,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum StateRecord {
@@ -385,6 +388,9 @@ pub(crate) enum StateRecord {
     },
     Host(Box<HostState>),
     Device(Box<DeviceState>),
+    InputDevice(Box<super::input::InputDevice>),
+    InputEndpoint(Box<super::input::InputEndpoint>),
+    InputDiscovery(super::input::DiscoveryStatus),
 }
 impl StateRecord {
     pub(crate) fn key(&self) -> RecordKey {
@@ -399,6 +405,9 @@ impl StateRecord {
             Self::Device(state) => {
                 RecordKey::Device(state.source.component(), state.source.endpoint())
             }
+            Self::InputDevice(device) => RecordKey::InputDevice(device.id),
+            Self::InputEndpoint(endpoint) => RecordKey::InputEndpoint(endpoint.id),
+            Self::InputDiscovery(_) => RecordKey::InputDiscovery,
         }
     }
 }

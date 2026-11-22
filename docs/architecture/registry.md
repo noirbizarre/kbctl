@@ -8,6 +8,8 @@ no enumeration, opening, probing, connection, topology mutation or capability pu
 The [built-in identifier table](devices.md#source-backed-identification-definitions) includes source-backed GMMK Pro,
 Defy and Naya Create definitions. These recognize reviewed identifiers, not hardware-validated KBCTL compatibility.
 The binary still has no CLI device command or live discovery host.
+Issue #11 reuses physical predicates through `Registry::identify_metadata` for the independent
+[input inventory](../input-discovery.md), without manufacturing physical devices, association plans or management routes.
 
 ## Definitions and provenance
 

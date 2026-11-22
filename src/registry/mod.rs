@@ -20,6 +20,19 @@ use crate::{
 pub(crate) mod builtin;
 mod matching;
 
+pub(crate) use crate::model::identity::Identification;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PhysicalMetadata<'a> {
+    pub(crate) usb: Option<UsbIds>,
+    pub(crate) serial: Option<&'a AdvertisedSerial>,
+}
+
+pub(crate) struct MetadataIdentification {
+    pub(crate) identification: Identification,
+    pub(crate) assessments: Vec<DefinitionAssessment>,
+}
+
 #[derive(Debug, Error, Diagnostic)]
 pub(crate) enum RegistryError {
     #[error("invalid registry declaration `{id}`: {reason}")]
@@ -174,12 +187,6 @@ impl PredicateCheck {
 pub(crate) struct DefinitionAssessment {
     pub(crate) definition: String,
     pub(crate) checks: Vec<PredicateCheck>,
-}
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Identification {
-    Unknown,
-    Identified(String),
-    Ambiguous(Vec<String>),
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EndpointAssessment {
@@ -412,6 +419,35 @@ impl Registry {
     }
     pub(crate) fn definitions(&self) -> &[DeviceDefinition] {
         &self.definitions
+    }
+    pub(crate) fn identify_metadata(
+        &self,
+        metadata: PhysicalMetadata<'_>,
+    ) -> MetadataIdentification {
+        let assessments: Vec<_> = self
+            .definitions
+            .iter()
+            .map(|definition| DefinitionAssessment {
+                definition: definition.id.clone(),
+                checks: matching::physical_checks(&definition.selector, metadata),
+            })
+            .collect();
+        let identification = matching::identify(
+            assessments
+                .iter()
+                .filter(|assessment| {
+                    assessment
+                        .checks
+                        .iter()
+                        .all(|check| check.verdict() == Verdict::Satisfied)
+                })
+                .map(|assessment| assessment.definition.clone())
+                .collect(),
+        );
+        MetadataIdentification {
+            identification,
+            assessments,
+        }
     }
     pub(crate) fn source(&self, id: &str) -> Option<&SourceRecord> {
         self.sources.get(id)

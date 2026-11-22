@@ -25,6 +25,33 @@ const USB: UsbIds = UsbIds {
     product: 1,
 };
 
+#[test]
+fn metadata_identification_and_topology_inspection_share_exact_physical_predicates() {
+    let mut a = definition("fixture.a", serial_channel(None));
+    a.selector.serial = Some(AdvertisedSerial::new("Exact ").unwrap());
+    let b = definition("fixture.b", serial_channel(None));
+    let registry = Registry::new(vec![a, b], sources(), 4096).unwrap();
+    for (usb, serial) in [
+        (Some(USB), Some("Exact ")),
+        (Some(USB), Some("exact ")),
+        (Some(USB), None),
+        (None, Some("Exact ")),
+    ] {
+        let mut topology = Topology::new();
+        let physical = topology
+            .add_physical_device(None, spec(usb, serial, vec![]))
+            .unwrap();
+        let inspected = registry.inspect(&topology, physical, &[]).unwrap();
+        let serial = serial.map(|value| AdvertisedSerial::new(value).unwrap());
+        let metadata = registry.identify_metadata(PhysicalMetadata {
+            usb,
+            serial: serial.as_ref(),
+        });
+        assert_eq!(metadata.identification, inspected.identification);
+        assert_eq!(metadata.assessments, inspected.assessments);
+    }
+}
+
 fn serial_channel(interface_number: Option<u8>) -> EndpointSelector {
     EndpointSelector {
         transport: TransportKind::Serial,

@@ -293,3 +293,10 @@ project belongs in the template, not here.
 Use the [hardware-free backend testing guide](docs/backend-testing.md) for scripted transports, protocol fixtures and
 shared conformance tests. [Hardware-in-the-loop testing](docs/hardware-testing.md) follows an explicit, ignored opt-in convention;
 regular CI requires no physical keyboard. Current protocol fixtures are synthetic, not interoperability evidence.
+
+## Linux input discovery
+
+Linux development requires `pkg-config` and libudev development files (`libudev-dev` on Debian/Ubuntu).
+See [input discovery](docs/input-discovery.md) for the internal service, metadata/access boundaries, synthetic tests and
+cross-build prerequisites. Use the mocked source and metadata reader for permission/hotplug tests; normal tests must
+not depend on `/dev/input` permissions, a running udev monitor or physical keyboards.

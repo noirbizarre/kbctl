@@ -1,0 +1,25 @@
+# Project-owned native input bindings must link the target's libudev, not the runner's.
+[target.x86_64-unknown-linux-gnu]
+# Pin the tested multiarch-capable image; cross versions otherwise choose different base tags.
+image = "ghcr.io/cross-rs/x86_64-unknown-linux-gnu@sha256:f2a67ee42fa85ec77d7cf17351d07926d71ef155ac6ac610eb87350a459b0e55"
+pre-build = [
+  "dpkg --add-architecture $CROSS_DEB_ARCH",
+  "apt-get update && apt-get install --assume-yes --no-install-recommends pkg-config libudev-dev:$CROSS_DEB_ARCH",
+]
+
+[target.x86_64-unknown-linux-gnu.env]
+passthrough = ["PKG_CONFIG_LIBDIR=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig"]
+
+[target.aarch64-unknown-linux-gnu]
+image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu@sha256:5b17f3a54b7a7c750764d2b8185d66e3d9c29e7d50e7af9ac1dd4c12d91a7301"
+pre-build = [
+  "dpkg --add-architecture $CROSS_DEB_ARCH",
+  "apt-get update && apt-get install --assume-yes --no-install-recommends pkg-config libudev-dev:$CROSS_DEB_ARCH",
+]
+
+[target.aarch64-unknown-linux-gnu.env]
+# Cross's compiler sysroot and the multiarch pkg-config directory must agree.
+passthrough = [
+  "PKG_CONFIG_ALLOW_CROSS=1",
+  "PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig",
+]

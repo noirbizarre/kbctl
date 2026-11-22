@@ -5,18 +5,26 @@ fn check(expected: Fact, observed: Option<Fact>) -> PredicateCheck {
     PredicateCheck { expected, observed }
 }
 
-fn physical_checks(selector: &PhysicalSelector, view: &DiscoveryView<'_>) -> Vec<PredicateCheck> {
-    let mut checks = vec![check(
-        Fact::Usb(selector.usb),
-        view.physical().usb_ids().map(Fact::Usb),
-    )];
+pub(super) fn physical_checks(
+    selector: &PhysicalSelector,
+    metadata: PhysicalMetadata<'_>,
+) -> Vec<PredicateCheck> {
+    let mut checks = vec![check(Fact::Usb(selector.usb), metadata.usb.map(Fact::Usb))];
     if let Some(serial) = &selector.serial {
         checks.push(check(
             Fact::Serial(serial.clone()),
-            view.physical().serial().cloned().map(Fact::Serial),
+            metadata.serial.cloned().map(Fact::Serial),
         ));
     }
     checks
+}
+
+pub(super) fn identify(ids: Vec<String>) -> Identification {
+    match ids.as_slice() {
+        [] => Identification::Unknown,
+        [one] => Identification::Identified(one.clone()),
+        _ => Identification::Ambiguous(ids),
+    }
 }
 
 fn endpoint_checks(
@@ -234,7 +242,13 @@ pub(super) fn inspect(
     let mut matches = Vec::new();
     let mut routes: BTreeMap<RouteKey, RegistryRoute> = BTreeMap::new();
     for definition in &registry.definitions {
-        let checks = physical_checks(&definition.selector, &view);
+        let checks = physical_checks(
+            &definition.selector,
+            PhysicalMetadata {
+                usb: view.physical().usb_ids(),
+                serial: view.physical().serial(),
+            },
+        );
         let qualifies = checks
             .iter()
             .all(|check| check.verdict() == Verdict::Satisfied);
@@ -339,16 +353,12 @@ pub(super) fn inspect(
             plan,
         });
     }
-    let identification = match matches.as_slice() {
-        [] => Identification::Unknown,
-        [one] => Identification::Identified(one.definition.id.clone()),
-        _ => Identification::Ambiguous(
-            matches
-                .iter()
-                .map(|matched| matched.definition.id.clone())
-                .collect(),
-        ),
-    };
+    let identification = identify(
+        matches
+            .iter()
+            .map(|matched| matched.definition.id.clone())
+            .collect(),
+    );
     Ok(Inspection {
         physical: view.physical().id(),
         identification,

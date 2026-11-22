@@ -5,5 +5,6 @@ pub(crate) mod clock;
 pub(crate) mod conformance;
 pub(crate) mod device;
 pub(crate) mod fixture;
+pub(crate) mod input;
 pub(crate) mod poll;
 pub(crate) mod transport;

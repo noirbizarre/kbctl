@@ -11,6 +11,7 @@
 pub(crate) mod capability;
 pub(crate) mod connection;
 pub(crate) mod identity;
+pub(crate) mod input;
 pub(crate) mod observation;
 pub(crate) mod state;
 pub(crate) mod time;

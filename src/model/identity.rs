@@ -55,8 +55,29 @@ runtime_id!(
     CapabilityRefreshId,
     BackendSessionId,
     HostSourceId,
-    HostGeneration
+    HostGeneration,
+    InputDeviceId,
+    InputEndpointId
 );
+
+impl InputDeviceId {
+    pub(crate) fn new() -> Result<Self> {
+        Self::allocate()
+    }
+}
+impl InputEndpointId {
+    pub(crate) fn new() -> Result<Self> {
+        Self::allocate()
+    }
+}
+
+/// Registry recognition identifies a model, never an individual unit or a route.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Identification {
+    Unknown,
+    Identified(String),
+    Ambiguous(Vec<String>),
+}
 
 impl BackendSessionId {
     pub(crate) fn new() -> Result<Self> {

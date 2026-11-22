@@ -5,6 +5,8 @@ use miette::Diagnostic;
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use thiserror::Error;
 
+mod input;
+
 use crate::{
     backends::{
         CapabilityDelivery, ObservationDelivery, PreparedRefresh, Session, SessionObserver,
@@ -43,6 +45,9 @@ pub(crate) enum RuntimeError {
         )
     )]
     Backend(#[from] BackendError),
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Input(#[from] input::InputError),
 }
 pub(crate) type Result<T> = std::result::Result<T, RuntimeError>;
 
@@ -77,6 +82,7 @@ struct Action {
 }
 
 pub(crate) struct Runtime {
+    inputs: input::Inventory,
     topology: Topology,
     store: StateStore,
     clock: Arc<dyn Clock>,
@@ -103,6 +109,7 @@ impl Runtime {
         let mut endpoint_times = BTreeMap::new();
         let records = topology_records(&topology, &mut endpoint_times, Timestamp::ZERO);
         Ok(Self {
+            inputs: input::Inventory::default(),
             topology,
             store: StateStore::new(records, epochs)?,
             clock,
@@ -196,6 +203,7 @@ impl Runtime {
     fn finish(&mut self, action: Action, ignored_stale_fields: usize) -> CommitOutcome {
         self.reconcile(&action.lives, action.at);
         let mut records = topology_records(&self.topology, &mut self.endpoint_times, action.at);
+        self.inputs.project(&self.topology, &mut records);
         for (id, registered) in &self.sessions {
             let record = StateRecord::Session {
                 id: *id,

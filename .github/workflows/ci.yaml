@@ -39,6 +39,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Project-specific native bindings need headers even during Clippy/check.
+      - uses: ./.github/actions/setup-linux-input
+
       # The channel comes from the action ref, not rust-toolchain.toml,
       # and each job installs the components it needs.
       - uses: dtolnay/rust-toolchain@stable
@@ -103,6 +106,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
+
+      - uses: ./.github/actions/setup-linux-input
+        if: runner.os == 'Linux'
 
       # mold is Linux-only, so it only applies to this one leg of the matrix.
       - name: Install mold (faster Linux linker)
@@ -177,6 +183,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-linux-input
 
       - name: Read the MSRV from Cargo.toml
         id: msrv

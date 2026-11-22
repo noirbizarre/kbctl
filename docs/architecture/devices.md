@@ -5,6 +5,7 @@ No KBCTL backend or physical-device validation accompanies this document. Source
 firmware, revisions and connection modes; a product's typing connectivity does not establish management connectivity.
 The [implemented domain model](model.md) tests proposed topologies with synthetic discovery data. Issue #8 adds a
 [metadata registry](registry.md) with source-backed identification definitions and explicitly qualified fixtures.
+Issue #11 adds [input metadata discovery](../input-discovery.md); its synthetic tests do not add physical-device validation.
 
 ## Evidence matrix
 

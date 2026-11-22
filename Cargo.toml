@@ -101,3 +101,9 @@ pretty_assertions = "1"
 clap = { version = "4", features = ["derive", "env", "wrap_help"] }
 clap_mangen = "0.3"
 clap_complete = "4"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Metadata discovery and processed hotplug notifications; no event-stream access.
+udev = { version = "0.9.3", default-features = false }
+# Capture native receive errors immediately; udev's iterator discards them.
+errno = "0.3"

@@ -3,7 +3,8 @@
 Status: Accepted design; implementation pending.
 
 Issue #7 defines [injected transport leases and access grants](../backends.md), with fake-adapter tests.
-Actual Linux discovery, safe opens, exclusive-access acquisition and device permissions below remain pending.
+Issue #11 adds [metadata-only Linux input discovery](../../input-discovery.md), with event-stream access explicitly
+unchecked. USB/HID discovery, safe device opens, exclusive-access acquisition and device permissions below remain pending.
 
 ## Context
 
