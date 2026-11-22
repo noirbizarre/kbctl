@@ -1,7 +1,7 @@
 # Opt-in hardware-in-the-loop tests
 
 Regular CI runs without physical keyboards. The deterministic [backend tests](backend-testing.md), scripted transports
-and synthetic fixtures are the primary regression suite. No real OS transport/backend or hardware test exists yet;
+and synthetic fixtures are the primary regression suite. No real management transport/backend or hardware test exists yet;
 the following convention applies when one is added.
 
 ## Adding a real test

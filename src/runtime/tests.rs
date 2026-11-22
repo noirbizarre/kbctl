@@ -191,6 +191,7 @@ fn unavailable_host_collection_requires_a_fresh_generation_instead_of_reporting_
         HostUnavailable::Unsupported,
         HostUnavailable::PermissionDenied,
         HostUnavailable::Inaccessible,
+        HostUnavailable::EventGap,
     ] {
         let (mut runtime, clock) = setup();
         let (handle, _) = runtime.register_host(scope(), clock.at(0)).unwrap();
@@ -259,6 +260,180 @@ fn unavailable_host_collection_requires_a_fresh_generation_instead_of_reporting_
             FieldQuality::Fresh
         );
     }
+}
+
+#[test]
+fn per_lock_unavailability_is_ordered_and_preserves_last_known_without_poisoning_newer_values() {
+    let (mut runtime, clock) = setup();
+    let (handle, _) = runtime.register_host(scope(), clock.at(0)).unwrap();
+    runtime
+        .apply_host(
+            handle,
+            patch(HostLock::Caps, HostValue::Known(true)),
+            1,
+            clock.time(0),
+            clock.time(10),
+            clock.at(0),
+        )
+        .unwrap();
+    let known = host(&runtime, handle).fields[&HostLock::Caps]
+        .last_known
+        .clone();
+    runtime
+        .apply_host(
+            handle,
+            patch(
+                HostLock::Caps,
+                HostValue::Unavailable(HostUnavailable::Unsupported),
+            ),
+            2,
+            clock.time(1),
+            clock.time(10),
+            clock.at(1),
+        )
+        .unwrap();
+    let unavailable = host(&runtime, handle);
+    assert_eq!(unavailable.availability, SourceAvailability::Active);
+    assert_eq!(unavailable.fields[&HostLock::Caps].last_known, known);
+    assert_eq!(
+        unavailable.fields[&HostLock::Caps].quality(),
+        FieldQuality::Failed
+    );
+    assert_eq!(
+        unavailable.fields[&HostLock::Caps].failure.unwrap().cause,
+        SourceFailure::HostUnsupported
+    );
+    runtime
+        .apply_host(
+            handle,
+            patch(HostLock::Caps, HostValue::Known(false)),
+            3,
+            clock.time(2),
+            clock.time(10),
+            clock.at(2),
+        )
+        .unwrap();
+    let outcome = runtime
+        .apply_host(
+            handle,
+            patch(
+                HostLock::Caps,
+                HostValue::Unavailable(HostUnavailable::PermissionDenied),
+            ),
+            2,
+            clock.time(1),
+            clock.time(10),
+            clock.at(3),
+        )
+        .unwrap();
+    assert_eq!(outcome.ignored_stale_fields, 1);
+    let current = host(&runtime, handle);
+    assert!(current.fields[&HostLock::Caps].failure.is_none());
+    assert!(
+        !current.fields[&HostLock::Caps]
+            .last_known
+            .as_ref()
+            .unwrap()
+            .value
+    );
+    runtime
+        .apply_host(
+            handle,
+            patch(
+                HostLock::Num,
+                HostValue::Unavailable(HostUnavailable::Unsupported),
+            ),
+            4,
+            clock.time(3),
+            clock.time(10),
+            clock.at(3),
+        )
+        .unwrap();
+    let (new, _) = runtime.renew_host(handle, clock.at(3)).unwrap();
+    assert!(host(&runtime, new).fields[&HostLock::Num].failure.is_none());
+    assert!(
+        runtime
+            .apply_host(
+                handle,
+                patch(HostLock::Caps, HostValue::Known(true)),
+                5,
+                clock.time(3),
+                clock.time(10),
+                clock.at(3)
+            )
+            .is_err()
+    );
+}
+
+#[test]
+fn retiring_an_input_binding_atomically_stales_its_host_and_permanently_rejects_the_old_handle() {
+    let (mut runtime, clock) = setup();
+    let scan = crate::test_support::input::scan();
+    runtime
+        .apply_input_scan(
+            scan.clone(),
+            crate::model::input::MonitorStatus::Watching,
+            clock.at(0),
+        )
+        .unwrap();
+    let id = runtime.input_endpoints().next().unwrap().id;
+    let (handle, _) = runtime
+        .register_host_for_input(scope(), id, clock.at(0))
+        .unwrap();
+    runtime
+        .apply_host(
+            handle,
+            patch(HostLock::Caps, HostValue::Known(true)),
+            1,
+            clock.time(0),
+            clock.time(10),
+            clock.at(0),
+        )
+        .unwrap();
+    let mut empty = scan.clone();
+    empty.groups.clear();
+    empty.endpoints.clear();
+    let outcome = runtime
+        .apply_input_scan(
+            empty,
+            crate::model::input::MonitorStatus::Watching,
+            clock.at(1),
+        )
+        .unwrap();
+    let record = outcome.commit.unwrap().upserts[&RecordKey::Host(handle.id())].clone();
+    let StateRecord::Host(record) = record.as_ref() else {
+        panic!("host record");
+    };
+    assert_eq!(
+        record.availability,
+        SourceAvailability::Unavailable(SourceFailure::InvalidBinding)
+    );
+    assert_eq!(
+        record.fields[&HostLock::Caps].quality(),
+        FieldQuality::Stale
+    );
+    assert!(runtime.renew_host(handle, clock.at(1)).is_err());
+    runtime
+        .apply_input_scan(
+            scan,
+            crate::model::input::MonitorStatus::Watching,
+            clock.at(2),
+        )
+        .unwrap();
+    assert_ne!(runtime.input_endpoints().next().unwrap().id, id);
+    assert!(runtime.renew_host(handle, clock.at(2)).is_err());
+    assert!(
+        runtime
+            .apply_host(
+                handle,
+                patch(HostLock::Caps, HostValue::Known(false)),
+                2,
+                clock.time(2),
+                clock.time(10),
+                clock.at(2)
+            )
+            .is_err()
+    );
 }
 
 #[test]

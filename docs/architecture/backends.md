@@ -78,8 +78,9 @@ A lease contains an endpoint ID, attachment generation, transfer bound, prevalid
 The set rejects duplicate endpoints. Connection admission checks the selected candidate, exact endpoint set, kinds,
 attachment generations and required exclusivity. `AccessGrant::TransportExclusive` is an assertion by the opener about
 transport-specific access; it is not proof that unrelated processes or vendor tools are excluded. The reservation
-trait retains a guard's lifetime but does not acquire an OS lock. Actual opening, safe serial settings, process-lock
-implementation and device permissions remain host/platform work.
+trait retains a guard's lifetime but does not acquire an OS lock. Issue #12 supplies the
+[real process-ownership guard](../host-indicators.md#ownership-and-checked-opens) for indicator collection; management
+channel opening, safe serial settings and device permissions remain host/platform work.
 
 `IoRequest` distinguishes serial reads/writes from HID input/output/feature operations and preserves report IDs.
 Adapters register wakers when pending and do not wait synchronously for hardware. Leases reject mismatched operations,

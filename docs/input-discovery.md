@@ -47,7 +47,7 @@ lighting capabilities.
 Every endpoint's event-stream access is **`NotChecked`**. Discovery never opens `/dev/input/event*`, reads key events,
 grabs input, changes LED state, installs access rules or acquires hardware-management ownership. Metadata readability is
 not evidence that an eventual event-stream open would succeed. Actual collectors must apply their own access/lifetime
-contract; host indicator observation/control belongs to issues #12/#13.
+contract; [host indicator observation](host-indicators.md) is implemented separately in #12, while control remains #13.
 
 Failures carry the affected metadata path, operation, category and available OS error code, with an actionable
 `kbctl::input::discovery` diagnostic. Check the named path, sysfs/udev visibility, container mounts and specific access

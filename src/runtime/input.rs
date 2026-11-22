@@ -206,6 +206,12 @@ impl Inventory {
 }
 
 impl Runtime {
+    pub(crate) fn input_endpoints(&self) -> impl Iterator<Item = &InputEndpoint> {
+        self.inputs.endpoints.values()
+    }
+    pub(crate) fn input_endpoint(&self, id: InputEndpointId) -> Option<&InputEndpoint> {
+        self.input_endpoints().find(|endpoint| endpoint.id == id)
+    }
     pub(crate) fn apply_input_scan(
         &mut self,
         scan: Scan,

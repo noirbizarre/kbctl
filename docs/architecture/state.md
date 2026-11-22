@@ -3,9 +3,11 @@
 Issue [#9](https://github.com/noirbizarre/kbctl/issues/9) implements a private, backend-independent observed-state
 model and commit service. [`runtime::Runtime`](../../src/runtime/mod.rs) owns topology and is the exclusive normalized
 writer. [`state::StateReader`](../../src/state/mod.rs) supplies immutable snapshots and atomic live subscriptions.
-The CLI is not wired to this service yet; indicator collection, hardware protocols, hosting, D-Bus and persistence
+The CLI is not wired to this service yet; hardware-management protocols, hosting, D-Bus and persistence
 remain integration work. Issue #11 adds [Linux input metadata discovery](../input-discovery.md) and runtime-owned input
 group/endpoint/discovery-status records, sharing these same snapshots and commits without creating logical keyboards.
+Issue #12 adds [host indicator collection](../host-indicators.md), explicit input-source bindings and per-lock unavailable
+receipts. Per-lock failures are stamped unknown values plus failure facts, distinct from plain unknown and known false.
 
 ## Status vocabulary
 
@@ -34,8 +36,9 @@ device-reported `Unavailable` updates the supplied leaf. Layer sets and firmware
 Existing full `BatteryState` reports adapt into two explicit leaves; partial battery reports need not refresh charging.
 
 `HostPatch` has separate keys/value types and a host registration handle. It cannot address device LED state.
-Unsupported host collection, permission denial and inaccessible sources are explicit host availability transitions,
-never false lock values. Renewing an unavailable host source creates a fresh generation before accepting reports again.
+Whole-interface failures are explicit host availability transitions, never false lock values. Per-lock
+`HostValue::Unavailable` preserves partial support with a stamped unknown report and failure fact. Renewing an unavailable
+host source creates a fresh generation before accepting reports again.
 
 Snapshots and commits contain **complete replacement records**, not these input patches. Replacing a record means
 replacing its whole field map. An absent field is unobserved, not a default false/zero and not permission to keep an
@@ -44,8 +47,8 @@ old client-side value absent from the replacement. A component without source re
 ## Source scope and retained knowledge
 
 Host sources have a process-unique source ID, explicit opaque scope and generation. The model does not assume a
-singleton global lock state or assign a host scope to every keyboard. A future collector must document whether its
-scope describes a seat, input context, device or another authority.
+singleton global lock state or assign a host scope to every keyboard. Each collector documents whether its scope describes
+a seat, input context, device or another authority; the Linux indicator collector explicitly binds to an input endpoint.
 
 Device source slots are keyed by component and endpoint. Current provenance records reporter identity, session ID,
 captured attachment and original target/membership context. A controller may report for another physical member's
@@ -183,6 +186,7 @@ reentrant wakers and epoch handling. `runtime/tests.rs` covers host separation, 
 projection and mutation atomicity. `backends/state_tests.rs` exercises actual fake protocol ingress through the runtime,
 including reverse-consumed event/reply ordering, liveness, overflow, reconnect and source separation.
 
-This service is hardware-free. Linux host-source discovery/collection, real status queries, retry/scheduling policy,
-CLI/daemon hosting and D-Bus export remain separate integrations. Broader configuration payloads, desired state and
+The model/runtime remain hardware-independent. Linux input discovery and per-endpoint host indicator collection now
+provide host-driven collection/scheduling adapters. CLI/daemon hosting and D-Bus export remain separate integrations.
+Broader configuration payloads, desired state and
 cross-source winner/aggregation policies are not inferred by this model.

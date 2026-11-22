@@ -35,6 +35,7 @@ fn epochs() -> Box<dyn EpochSource> {
 }
 fn records(id: HostSourceId, generation: HostGeneration, scope: &str) -> Records {
     let record = StateRecord::Host(Box::new(HostState {
+        input: None,
         id,
         generation,
         scope: NamespacedId::new("test", scope).unwrap(),

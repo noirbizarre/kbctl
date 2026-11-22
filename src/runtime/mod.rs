@@ -202,6 +202,17 @@ impl Runtime {
     }
     fn finish(&mut self, action: Action, ignored_stale_fields: usize) -> CommitOutcome {
         self.reconcile(&action.lives, action.at);
+        // Input retirement must invalidate evidence in the same commit, before a collector runs again.
+        let inputs: std::collections::BTreeSet<_> =
+            self.input_endpoints().map(|endpoint| endpoint.id).collect();
+        for host in self.hosts.values_mut() {
+            if host.input.is_some_and(|id| !inputs.contains(&id)) {
+                host.availability = SourceAvailability::Unavailable(SourceFailure::InvalidBinding);
+                for field in host.fields.values_mut() {
+                    field.stale(action.at, StaleCause::Source(SourceFailure::InvalidBinding));
+                }
+            }
+        }
         let mut records = topology_records(&self.topology, &mut self.endpoint_times, action.at);
         self.inputs.project(&self.topology, &mut records);
         for (id, registered) in &self.sessions {
@@ -478,6 +489,23 @@ impl Runtime {
         scope: NamespacedId,
         now: Instant,
     ) -> Result<(HostHandle, CommitOutcome)> {
+        self.register_host_binding(scope, None, now)
+    }
+    pub(crate) fn register_host_for_input(
+        &mut self,
+        scope: NamespacedId,
+        input: crate::model::identity::InputEndpointId,
+        now: Instant,
+    ) -> Result<(HostHandle, CommitOutcome)> {
+        self.register_host_binding(scope, Some(input), now)
+    }
+    fn register_host_binding(
+        &mut self,
+        scope: NamespacedId,
+        input: Option<crate::model::identity::InputEndpointId>,
+        now: Instant,
+    ) -> Result<(HostHandle, CommitOutcome)> {
+        self.validate_host_input(input)?;
         let action = self.prepare(now)?;
         let id = HostSourceId::new()?;
         let generation = HostGeneration::new()?;
@@ -487,11 +515,23 @@ impl Runtime {
                 id,
                 generation,
                 scope,
+                input,
                 availability: SourceAvailability::Active,
                 fields: BTreeMap::new(),
             },
         );
         Ok((HostHandle { id, generation }, self.finish(action, 0)))
+    }
+    fn validate_host_input(
+        &self,
+        input: Option<crate::model::identity::InputEndpointId>,
+    ) -> std::result::Result<(), StateError> {
+        if input.is_some_and(|id| self.input_endpoint(id).is_none()) {
+            return Err(StateError::Invalid(
+                "host source input binding is retired; register a source for the replacement endpoint",
+            ));
+        }
+        Ok(())
     }
     fn host(&self, handle: HostHandle) -> std::result::Result<&HostState, StateError> {
         self.hosts
@@ -506,7 +546,7 @@ impl Runtime {
         handle: HostHandle,
         now: Instant,
     ) -> Result<(HostHandle, CommitOutcome)> {
-        self.host(handle)?;
+        self.validate_host_input(self.host(handle)?.input)?;
         let action = self.prepare(now)?;
         let generation = HostGeneration::new()?;
         let host = self.hosts.get_mut(&handle.id).expect("validated host");
@@ -561,6 +601,7 @@ impl Runtime {
         now: Instant,
     ) -> Result<CommitOutcome> {
         let host = self.host(handle)?;
+        self.validate_host_input(host.input)?;
         if host.availability != SourceAvailability::Active {
             return Err(StateError::Invalid(
                 "renew unavailable host source before accepting reports",
@@ -608,9 +649,14 @@ impl Runtime {
         let host = self.hosts.get_mut(&handle.id).expect("validated host");
         let mut ignored = 0;
         for (field, value) in patch.0 {
+            let failure = match value {
+                HostValue::Unavailable(reason) => Some(reason.failure()),
+                _ => None,
+            };
             let value = match value {
                 HostValue::Known(value) => Observation::Known(value),
                 HostValue::Unknown => Observation::Unknown,
+                HostValue::Unavailable(_) => Observation::Unknown,
             };
             let stamp = ReportStamp {
                 source: source.clone(),
@@ -620,13 +666,13 @@ impl Runtime {
                 measured_at: None,
                 origin: ReportOrigin::Host,
             };
-            if !host
-                .fields
-                .entry(field)
-                .or_default()
-                .apply(value, stamp, action.at)
-            {
+            let field = host.fields.entry(field).or_default();
+            if !field.apply(value, stamp, action.at) {
                 ignored += 1;
+            } else if let Some(cause) = failure {
+                // A rejected unavailable receipt must never poison newer accepted knowledge.
+                // Its failure time belongs to that receipt, not to a possibly delayed publication retry.
+                field.fail(received_at, cause);
             }
         }
         if self

@@ -107,3 +107,5 @@ clap_complete = "4"
 udev = { version = "0.9.3", default-features = false }
 # Capture native receive errors immediately; udev's iterator discards them.
 errno = "0.3"
+# Narrow evdev ioctls and checked, directory-relative ownership/open admission.
+nix = { version = "0.32", default-features = false, features = ["fs", "ioctl", "user"] }

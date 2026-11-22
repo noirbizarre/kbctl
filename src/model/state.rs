@@ -305,6 +305,7 @@ pub(crate) struct HostState {
     pub(crate) id: HostSourceId,
     pub(crate) generation: HostGeneration,
     pub(crate) scope: NamespacedId,
+    pub(crate) input: Option<InputEndpointId>,
     pub(crate) availability: SourceAvailability,
     pub(crate) fields: BTreeMap<HostLock, FieldState<bool>>,
 }
@@ -312,6 +313,7 @@ pub(crate) struct HostState {
 pub(crate) enum HostValue {
     Known(bool),
     Unknown,
+    Unavailable(HostUnavailable),
 }
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct HostPatch(pub(crate) BTreeMap<HostLock, HostValue>);
@@ -320,6 +322,7 @@ pub(crate) enum HostUnavailable {
     Unsupported,
     PermissionDenied,
     Inaccessible,
+    EventGap,
 }
 impl HostUnavailable {
     pub(crate) fn failure(self) -> SourceFailure {
@@ -327,6 +330,7 @@ impl HostUnavailable {
             Self::Unsupported => SourceFailure::HostUnsupported,
             Self::PermissionDenied => SourceFailure::PermissionDenied,
             Self::Inaccessible => SourceFailure::HostInaccessible,
+            Self::EventGap => SourceFailure::EventGap,
         }
     }
 }

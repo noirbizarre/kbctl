@@ -300,3 +300,10 @@ Linux development requires `pkg-config` and libudev development files (`libudev-
 See [input discovery](docs/input-discovery.md) for the internal service, metadata/access boundaries, synthetic tests and
 cross-build prerequisites. Use the mocked source and metadata reader for permission/hotplug tests; normal tests must
 not depend on `/dev/input` permissions, a running udev monitor or physical keyboards.
+
+## Host indicators
+
+The [host indicator guide](docs/host-indicators.md) describes endpoint scope, filtered event setup, snapshot fallback,
+ownership admission and lifecycle tests. Keep Linux indicator changes read-only, test ioctl/event behavior through the
+injected seam, and use temporary private directories for ownership tests. Regular tests must never open physical input
+nodes or depend on root privileges. Preserve discovery's metadata-only boundary.

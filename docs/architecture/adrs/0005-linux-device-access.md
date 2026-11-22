@@ -4,7 +4,8 @@ Status: Accepted design; implementation pending.
 
 Issue #7 defines [injected transport leases and access grants](../backends.md), with fake-adapter tests.
 Issue #11 adds [metadata-only Linux input discovery](../../input-discovery.md), with event-stream access explicitly
-unchecked. USB/HID discovery, safe device opens, exclusive-access acquisition and device permissions below remain pending.
+unchecked. Issue #12 implements [checked read-only evdev opens and host indicators](../../host-indicators.md) under a
+real process-ownership guard. USB/HID management discovery/opens, exclusive access and packaged device rules remain pending.
 
 ## Context
 

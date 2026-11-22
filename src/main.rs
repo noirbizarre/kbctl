@@ -10,6 +10,7 @@ use miette::MietteHandlerOpts;
 mod backends;
 mod cli;
 mod error;
+mod indicators;
 mod input;
 mod model;
 mod platform;

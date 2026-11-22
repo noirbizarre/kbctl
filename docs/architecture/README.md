@@ -13,12 +13,14 @@ Issue #7 adds [executor-neutral backend/transport contracts and shared session l
 fake protocols with typed battery/firmware observations. Issue #8 adds a [deterministic metadata registry](registry.md)
 and source-backed target identifiers, with real protocol references remaining research-only. Issue #9 adds
 [normalized observed state and the runtime commit service](state.md), with partial fields, explicit freshness,
-source/lifecycle reconciliation, snapshots and bounded subscriptions. Host indicator collection, OS opens/ownership
-locks, hardware backends, scheduling, CLI/daemon hosting and D-Bus API integration remain pending.
+source/lifecycle reconciliation, snapshots and bounded subscriptions. Hardware-management backends, CLI/daemon hosting
+and D-Bus API integration remain pending.
 Issue #10 adds [reusable hardware-free test support](../backend-testing.md), versioned synthetic replay fixtures and
 shared backend conformance groups, with a separate [opt-in hardware-testing convention](../hardware-testing.md).
 Issue #11 adds [Linux input metadata discovery](../input-discovery.md), a host-driven hotplug/reconciliation service and
 an independent input inventory published through the same runtime. The CLI still does not start a discovery host.
+Issue #12 adds [per-endpoint host indicator collection](../host-indicators.md), filtered evdev notifications with snapshot
+fallback, typed per-lock availability, checked opens and the shared per-user ownership guard. Hosting remains separate.
 
 ## Goals and boundaries
 
