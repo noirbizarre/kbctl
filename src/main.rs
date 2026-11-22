@@ -14,6 +14,8 @@ mod model;
 mod registry;
 mod runtime;
 mod state;
+#[cfg(test)]
+mod test_support;
 mod transport;
 
 use cli::{Cli, Command};

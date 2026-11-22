@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "id": "synthetic.malformed.v1",
+  "origin": { "kind": "synthetic", "procedure": "Deliberately invalid battery percentage in a complete toy serial frame", "sanitization": "Entirely generated negative-test bytes; no hardware data" },
+  "device": { "model": "Synthetic keyboard", "revision": "fixture-v1", "firmware": "synthetic-r4" },
+  "protocol": { "id": "kbctl.synthetic.serial", "version": "1" },
+  "purpose": "Reject a complete malformed response without clamping or fabricating a value",
+  "endpoints": [{
+    "alias": "main", "transport": "serial", "gates": ["read-written"], "idle": ["serial_read"],
+    "steps": [
+      { "id": "handshake", "op": "serial_read", "outcome": { "kind": "input", "bytes": [1, 0, 126] } },
+      { "id": "read-request", "op": "serial_write", "releases": "read-written", "outcome": { "kind": "output", "bytes": [16, 0] } },
+      { "id": "read-reply", "op": "serial_read", "after": "read-written", "outcome": { "kind": "input", "bytes": [2, 0, 144, 255] } }
+    ]
+  }]
+}

@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "synthetic.firmware.v1",
+  "origin": { "kind": "synthetic", "procedure": "Constructed from the documented toy serial v1 codec", "sanitization": "No hardware data, identifiers, key events or personal configuration was recorded" },
+  "device": { "model": "Synthetic keyboard", "revision": "fixture-v1", "firmware": "synthetic-r4" },
+  "protocol": { "id": "kbctl.synthetic.serial", "version": "1" },
+  "purpose": "Connect, discover capabilities and reconstruct a variable-length firmware response",
+  "endpoints": [{
+    "alias": "main", "transport": "serial", "gates": ["cap-written", "read-written"], "idle": ["serial_read"],
+    "steps": [
+      { "id": "handshake", "op": "serial_read", "outcome": { "kind": "input", "bytes": [1, 0, 126] } },
+      { "id": "cap-request", "op": "serial_write", "releases": "cap-written", "outcome": { "kind": "output", "bytes": [18, 0] } },
+      { "id": "cap-reply", "op": "serial_read", "after": "cap-written", "outcome": { "kind": "input", "bytes": [1, 0, 146] } },
+      { "id": "read-request", "op": "serial_write", "releases": "read-written", "outcome": { "kind": "output", "bytes": [17, 0] } },
+      { "id": "read-reply", "op": "serial_read", "after": "read-written", "outcome": { "kind": "input", "bytes": [3, 0, 145, 114, 52] } }
+    ]
+  }]
+}

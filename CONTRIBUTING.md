@@ -285,3 +285,11 @@ have project-specific section markers. Add below them, or put global mise
 tools between the begin/end project-specific tools markers. Git's 3-way merge
 then preserves your additions across updates. A fix that belongs to every
 project belongs in the template, not here.
+
+<!-- project-specific -->
+
+## Backend testing
+
+Use the [hardware-free backend testing guide](docs/backend-testing.md) for scripted transports, protocol fixtures and
+shared conformance tests. [Hardware-in-the-loop testing](docs/hardware-testing.md) follows an explicit, ignored opt-in convention;
+regular CI requires no physical keyboard. Current protocol fixtures are synthetic, not interoperability evidence.

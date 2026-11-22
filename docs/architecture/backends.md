@@ -6,6 +6,7 @@ machinery enforces ownership lifetime, request cancellation, bounded delivery an
 exercise that machinery. Issue #8 adds the separate [metadata registry](registry.md); no real keyboard protocol,
 OS opener, daemon or CLI device command is implemented.
 Issue #9 adds the [normalized runtime/state service](state.md) and source receipt/liveness integration described below.
+Issue #10 supplies [shared test support and conformance](../backend-testing.md), with versioned synthetic fixtures.
 
 ## Boundaries
 
@@ -214,9 +215,15 @@ phase, operation, endpoint and original source chains. Stable codes are `kbctl::
 `kbctl::transport::<kind>`, with actionable diagnostic help. A decoded result rejected as stale is different from
 a protocol failing to decode a reply.
 
-[`backends/fake.rs`](../../src/backends/fake.rs) separates synthetic metadata mappings from a reusable toy wire pump
-and independent battery/firmware adapters. [`backends/tests.rs`](../../src/backends/tests.rs) and
-[`transport/tests.rs`](../../src/transport/tests.rs) manually poll futures with counting wakers, synthetic frames,
-failure injection and a manual clock. They test ownership cleanup, partial negotiation, cancellation, reconnect,
-request/event separation, queue/buffer/work bounds and actual topology/capability publication. No sleeps, hardware
-or executor dependency are required. These tests do not establish compatibility with GMMK Pro, Defy or Naya Create.
+[`backends/fake.rs`](../../src/backends/fake.rs) layers synthetic mappings and independent battery/firmware adapters over
+the shared scripted transport/device/lease helpers. Its toy serial v1 codec has length-prefixed inbound frames and
+two-byte commands, with bounded incremental decode state and partial-write offsets; read chunks are not frame boundaries.
+The payload-oriented `Wire::push` façade keeps specialized state tests readable; raw input is explicit.
+
+[`backends/conformance_tests.rs`](../../src/backends/conformance_tests.rs) registers both feature adapters against the
+same protocol-independent lifecycle/capability/read/event assertions. The [versioned corpus](../../tests/fixtures/backends/v1/README.md)
+exercises fragmentation, short writes, gated events, malformed responses and pending truncation. Other backend/state
+tests retain their targeted ordering, ownership and freshness checks; the adversarial transport probe stays local.
+See [backend testing](../backend-testing.md) for APIs, fixtures and contribution steps, and
+[hardware testing](../hardware-testing.md) for ignored opt-in test conventions. No sleeps, physical devices or executor
+dependency are required by the regular suite. Synthetic replay does not establish target-keyboard compatibility.

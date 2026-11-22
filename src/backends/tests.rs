@@ -83,7 +83,7 @@ fn metadata_matching_preserves_ambiguity_without_opening_or_querying_hardware() 
         MatchResolution::NoMatch
     ));
     assert_eq!(rig.wires[&rig.primary].writes(), 0);
-    assert!(rig.log.lock().unwrap().is_empty());
+    assert!(rig.factory.lifecycle().is_empty());
 }
 
 #[test]

@@ -270,8 +270,8 @@ pub(crate) trait FirmwareProtocol: Send {
 
 /// One driver owns correlation/framing for both pending requests and unsolicited
 /// input. It must bound decoder accumulation and never block in a poll method.
-/// `max_frame` bounds each frame and incomplete-frame accumulation; adapters
-/// must reject excess input rather than grow a decoder indefinitely across polls.
+/// `max_frame` bounds message payload and variable decoder accumulation; any
+/// fixed framing header is bounded separately. Never accumulate indefinitely.
 pub(crate) trait ProtocolDriver: Send {
     fn requires_exclusive(&self) -> bool {
         false
@@ -379,6 +379,8 @@ impl PreparedRefresh {
     }
 }
 
+#[cfg(test)]
+mod conformance_tests;
 #[cfg(test)]
 mod fake;
 #[cfg(test)]

@@ -2,30 +2,10 @@ use super::*;
 use crate::model::{
     identity::{HardwareIdentity, IdentityAbsence},
     observation::{HostLock, Percentage},
-    time::Clock,
     topology::{ComponentSpec, EndpointSpec, InterfaceSpec},
 };
-use std::{sync::Mutex, time::Duration};
-
-struct Manual {
-    origin: Instant,
-    now: Mutex<Instant>,
-}
-impl Clock for Manual {
-    fn now(&self) -> Instant {
-        *self.now.lock().unwrap()
-    }
-}
-impl Manual {
-    fn time(&self, second: u64) -> Instant {
-        self.origin + Duration::from_secs(second)
-    }
-    fn at(&self, second: u64) -> Instant {
-        let now = self.time(second);
-        *self.now.lock().unwrap() = now;
-        now
-    }
-}
+use crate::test_support::clock::ManualClock as Manual;
+use std::time::Duration;
 struct Epochs {
     next: u8,
     fail_at: Option<u8>,
@@ -43,11 +23,7 @@ impl EpochSource for Epochs {
     }
 }
 fn setup() -> (Runtime, Arc<Manual>) {
-    let origin = Instant::now();
-    let clock = Arc::new(Manual {
-        origin,
-        now: Mutex::new(origin),
-    });
+    let clock = Arc::new(Manual::new());
     let runtime = Runtime::with_epochs(
         Topology::new(),
         clock.clone(),

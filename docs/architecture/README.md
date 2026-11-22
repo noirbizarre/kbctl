@@ -15,6 +15,8 @@ and source-backed target identifiers, with real protocol references remaining re
 [normalized observed state and the runtime commit service](state.md), with partial fields, explicit freshness,
 source/lifecycle reconciliation, snapshots and bounded subscriptions. Host enumeration/collection, OS opens/ownership
 locks, hardware backends, scheduling, CLI/daemon hosting and D-Bus API integration remain pending.
+Issue #10 adds [reusable hardware-free test support](../backend-testing.md), versioned synthetic replay fixtures and
+shared backend conformance groups, with a separate [opt-in hardware-testing convention](../hardware-testing.md).
 
 ## Goals and boundaries
 
@@ -82,6 +84,7 @@ src/backends/         protocol-specific recognition and queries
 src/transport/        HID and serial I/O boundaries
 src/platform/linux/   discovery, permissions and ownership locking
 src/daemon/           foreground lifetime and D-Bus adaptation
+src/test_support/     cfg(test)-only clocks, scripted I/O, device fixtures and conformance
 ```
 
 This is a boundary sketch, not a requirement to create empty modules. No `lib.rs`, workspace split, external

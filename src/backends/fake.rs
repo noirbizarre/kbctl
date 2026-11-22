@@ -1,20 +1,30 @@
 //! Synthetic mappings over one shared toy protocol; not a hardware backend.
 
 use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
-    io,
-    sync::{Arc, Mutex},
-    task::{Context, Poll, Wake, Waker},
+    collections::BTreeMap,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    task::{Context, Poll},
     time::{Duration, Instant},
 };
 
+pub(super) use crate::test_support::{
+    clock::ManualClock,
+    poll::{WakeCounter, poll_once, ready},
+};
+use crate::test_support::{
+    device::{DeviceBuilder, DevicePart},
+    transport::{Controller, LeaseFactory, Operation, Script},
+};
 use crate::{
     model::{
         capability::{
             CapabilityEntry, CapabilityOperation as Op, CapabilityReport, CapabilityScope,
             ReportedVersion, Support, VersionKind,
         },
-        connection::{ConnectionState, EndpointLocator, TransportKind},
+        connection::{EndpointLocator, TransportKind},
         identity::{ComponentId, EndpointId, KeyboardId},
         identity::{HardwareIdentity, IdentityAbsence},
         observation::{
@@ -24,10 +34,7 @@ use crate::{
             ComponentKind, ComponentSpec, EndpointSpec, PhysicalDeviceSpec, Topology, UsbIds,
         },
     },
-    transport::{
-        AccessGrant, IoRequest, LeaseSet, OwnershipReservation, TransportError, TransportFailure,
-        TransportIo, TransportLease,
-    },
+    transport::{AccessGrant, IoRequest, LeaseSet, TransportFailure},
 };
 
 use super::{
@@ -35,177 +42,76 @@ use super::{
     *,
 };
 
-pub(super) struct ManualClock(Mutex<Instant>);
-impl Clock for ManualClock {
-    fn now(&self) -> Instant {
-        *self.0.lock().unwrap()
-    }
+#[derive(Clone)]
+pub(super) struct Wire {
+    pub(super) control: Controller,
+    auto_reply: Arc<AtomicBool>,
 }
-impl ManualClock {
-    pub(super) fn advance(&self, duration: Duration) {
-        *self.0.lock().unwrap() += duration;
-    }
-    pub(super) fn rewind(&self, duration: Duration) {
-        *self.0.lock().unwrap() -= duration;
-    }
+pub(super) fn frame(payload: &[u8]) -> Vec<u8> {
+    let length = u16::try_from(payload.len()).expect("toy frame payload fits u16");
+    let mut encoded = length.to_le_bytes().to_vec();
+    encoded.extend_from_slice(payload);
+    encoded
 }
-
-#[derive(Default)]
-pub(super) struct WakeCounter(pub(super) std::sync::atomic::AtomicUsize);
-impl Wake for WakeCounter {
-    fn wake(self: Arc<Self>) {
-        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    }
-    fn wake_by_ref(self: &Arc<Self>) {
-        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    }
-}
-pub(super) fn poll_once<F: Future + ?Sized>(mut future: Pin<&mut F>) -> Poll<F::Output> {
-    let waker = Waker::from(Arc::new(WakeCounter::default()));
-    future.as_mut().poll(&mut Context::from_waker(&waker))
-}
-pub(super) fn ready<F: Future>(future: F) -> F::Output {
-    let mut future = Box::pin(future);
-    // Fakes with immediate queued data may yield for fairness/handshake stages.
-    // A permanently pending future is a test error, never an excuse to sleep.
-    for _ in 0..64 {
-        if let Poll::Ready(value) = poll_once(future.as_mut()) {
-            return value;
+impl Wire {
+    pub(super) fn new() -> Self {
+        let control = Controller::new(
+            "synthetic serial v1",
+            TransportKind::Serial,
+            Script {
+                idle: std::collections::BTreeSet::from([Operation::SerialRead]),
+                ..Script::default()
+            },
+        )
+        .unwrap();
+        let auto_reply = Arc::new(AtomicBool::new(true));
+        let enabled = auto_reply.clone();
+        control
+            .reactive_writes(
+                vec![vec![0x10, 0], vec![0x11, 0], vec![0x12, 0]],
+                Arc::new(move |command| {
+                    if !enabled.load(Ordering::Relaxed) {
+                        return vec![];
+                    }
+                    let payload = match command {
+                        [0x10, 0] => vec![0x90, 73],
+                        [0x11, 0] => vec![0x91, b'r', b'4'],
+                        [0x12, 0] => vec![0x92],
+                        _ => unreachable!("only exact declared commands complete"),
+                    };
+                    vec![frame(&payload)]
+                }),
+            )
+            .unwrap();
+        control.input(frame(&[0x7e]));
+        Self {
+            control,
+            auto_reply,
         }
     }
-    panic!("script did not complete after bounded manual polling");
-}
-
-struct WireState {
-    frames: VecDeque<std::result::Result<Vec<u8>, TransportFailure>>,
-    writes: Vec<Vec<u8>>,
-    waker: Option<Waker>,
-    auto_reply: bool,
-}
-#[derive(Clone)]
-pub(super) struct Wire(Arc<Mutex<WireState>>);
-impl Wire {
-    fn new() -> Self {
-        Self(Arc::new(Mutex::new(WireState {
-            frames: VecDeque::from([Ok(vec![0x7e])]),
-            writes: vec![],
-            waker: None,
-            auto_reply: true,
-        })))
+    pub(super) fn scripted(control: Controller) -> Self {
+        Self {
+            control,
+            auto_reply: Arc::new(AtomicBool::new(false)),
+        }
     }
     pub(super) fn push(&self, bytes: Vec<u8>) {
-        self.enqueue(Ok(bytes));
+        self.control.input(frame(&bytes));
+    }
+    pub(super) fn push_raw(&self, bytes: Vec<u8>) {
+        self.control.input(bytes);
     }
     pub(super) fn fault(&self, failure: TransportFailure) {
-        self.enqueue(Err(failure));
-    }
-    fn enqueue(&self, frame: std::result::Result<Vec<u8>, TransportFailure>) {
-        let wake = {
-            let mut wire = self.0.lock().unwrap();
-            wire.frames.push_back(frame);
-            wire.waker.take()
-        };
-        if let Some(waker) = wake {
-            waker.wake();
-        }
+        self.control.fault(Operation::SerialRead, failure, false);
     }
     pub(super) fn pause_replies(&self) {
-        self.0.lock().unwrap().auto_reply = false;
+        self.auto_reply.store(false, Ordering::Relaxed);
     }
     pub(super) fn clear_frames(&self) {
-        self.0.lock().unwrap().frames.clear();
+        self.control.clear_input();
     }
     pub(super) fn writes(&self) -> usize {
-        self.0.lock().unwrap().writes.len()
-    }
-}
-
-struct FakeIo {
-    endpoint: EndpointId,
-    wire: Wire,
-    log: Arc<Mutex<Vec<String>>>,
-    closed: bool,
-}
-impl TransportIo for FakeIo {
-    fn kind(&self) -> TransportKind {
-        TransportKind::Serial
-    }
-    fn poll_io(
-        &mut self,
-        cx: &mut Context<'_>,
-        request: IoRequest<'_>,
-    ) -> Poll<crate::transport::Result<usize>> {
-        let mut wire = self.wire.0.lock().unwrap();
-        match request {
-            IoRequest::SerialRead(buffer) => match wire.frames.pop_front() {
-                Some(Ok(frame)) if frame.len() > buffer.len() => {
-                    Poll::Ready(Err(TransportError::ResourceLimit {
-                        endpoint: self.endpoint,
-                        limit: buffer.len(),
-                    }))
-                }
-                Some(Ok(frame)) => {
-                    buffer[..frame.len()].copy_from_slice(&frame);
-                    Poll::Ready(Ok(frame.len()))
-                }
-                Some(Err(kind)) => Poll::Ready(Err(TransportError::Io {
-                    endpoint: self.endpoint,
-                    kind,
-                    source: io::Error::other("synthetic device vanished or denied access"),
-                })),
-                None => {
-                    wire.waker = Some(cx.waker().clone());
-                    Poll::Pending
-                }
-            },
-            IoRequest::SerialWrite(bytes) => {
-                wire.writes.push(bytes.to_vec());
-                if wire.auto_reply {
-                    let frame = match bytes {
-                        [0x10] => vec![0x90, 73],
-                        [0x11] => vec![0x91, b'r', b'4'],
-                        [0x12] => vec![0x92],
-                        _ => vec![0xff],
-                    };
-                    wire.frames.push_back(Ok(frame));
-                }
-                Poll::Ready(Ok(bytes.len()))
-            }
-            _ => Poll::Ready(Err(TransportError::WrongKind(self.endpoint))),
-        }
-    }
-    fn close(&mut self) {
-        if !self.closed {
-            self.closed = true;
-            self.log
-                .lock()
-                .unwrap()
-                .push(format!("close:{}", self.endpoint));
-        }
-    }
-}
-impl Drop for FakeIo {
-    fn drop(&mut self) {
-        self.log
-            .lock()
-            .unwrap()
-            .push(format!("drop:{}", self.endpoint));
-    }
-}
-
-struct Reservation {
-    endpoints: Vec<EndpointId>,
-    reserved: Arc<Mutex<BTreeSet<EndpointId>>>,
-    log: Arc<Mutex<Vec<String>>>,
-}
-impl OwnershipReservation for Reservation {}
-impl Drop for Reservation {
-    fn drop(&mut self) {
-        let mut reserved = self.reserved.lock().unwrap();
-        for endpoint in &self.endpoints {
-            reserved.remove(endpoint);
-        }
-        self.log.lock().unwrap().push("reservation".into());
+        self.control.completed_writes().len()
     }
 }
 
@@ -217,16 +123,28 @@ pub(super) struct Rig {
     pub(super) keyboard: KeyboardId,
     pub(super) clock: Arc<ManualClock>,
     pub(super) wires: BTreeMap<EndpointId, Wire>,
-    pub(super) log: Arc<Mutex<Vec<String>>>,
-    reserved: Arc<Mutex<BTreeSet<EndpointId>>>,
+    pub(super) factory: LeaseFactory,
 }
 impl Rig {
     pub(super) fn new(endpoint_count: usize, components: bool) -> Self {
-        let mut topology = Topology::new();
-        let physical = topology
-            .add_physical_device(
-                None,
-                PhysicalDeviceSpec {
+        assert!(
+            endpoint_count > 0,
+            "connected Rig needs a primary endpoint; use DeviceBuilder for discovery-only fixtures"
+        );
+        let mut fixture = DeviceBuilder::new()
+            .physical(DevicePart {
+                alias: "main".into(),
+                group: "keyboard".into(),
+                interfaces: vec![],
+                endpoints: (0..endpoint_count)
+                    .map(|index| format!("port-{index}"))
+                    .collect(),
+                components: if components {
+                    vec!["body".into()]
+                } else {
+                    vec![]
+                },
+                spec: PhysicalDeviceSpec {
                     name: None,
                     identity: HardwareIdentity::missing(IdentityAbsence::NotReported),
                     usb_ids: Some(UsbIds {
@@ -253,15 +171,16 @@ impl Rig {
                         vec![]
                     },
                 },
-            )
+            })
+            .build()
             .unwrap();
+        fixture.revalidate().unwrap();
+        let topology = fixture.topology;
+        let physical = fixture.physical["main"];
         let endpoints: Vec<_> = topology
             .endpoints(physical)
             .map(|endpoint| endpoint.id())
             .collect();
-        for endpoint in &endpoints {
-            topology.revalidate_endpoint(*endpoint).unwrap();
-        }
         let component = topology
             .components(physical)
             .next()
@@ -274,10 +193,9 @@ impl Rig {
             component,
             endpoints,
             keyboard,
-            clock: Arc::new(ManualClock(Mutex::new(Instant::now()))),
+            clock: Arc::new(ManualClock::new()),
             wires,
-            log: Arc::default(),
-            reserved: Arc::default(),
+            factory: LeaseFactory::default(),
         }
     }
     pub(super) fn context(&self) -> ConnectContext {
@@ -321,43 +239,13 @@ impl Rig {
         endpoints: &[EndpointId],
         grant: AccessGrant,
     ) -> crate::transport::Result<LeaseSet> {
-        let mut reserved = self.reserved.lock().unwrap();
-        if endpoints.iter().any(|endpoint| reserved.contains(endpoint)) {
-            return Err(TransportError::InvalidLease(
-                "fake opener's cooperative reservation is already held",
-            ));
-        }
-        reserved.extend(endpoints.iter().copied());
-        drop(reserved);
-        let reservation = Reservation {
-            endpoints: endpoints.to_vec(),
-            reserved: self.reserved.clone(),
-            log: self.log.clone(),
-        };
-        let leases = endpoints
+        let channels = self
+            .wires
             .iter()
-            .map(|endpoint| {
-                let ConnectionState::Ready(generation) =
-                    topology.endpoint(*endpoint).unwrap().state()
-                else {
-                    panic!("revalidate before opening a new lease");
-                };
-                TransportLease::new(
-                    *endpoint,
-                    generation,
-                    grant,
-                    Box::new(FakeIo {
-                        endpoint: *endpoint,
-                        wire: self.wires[endpoint].clone(),
-                        log: self.log.clone(),
-                        closed: false,
-                    }),
-                    1024,
-                )
-                .unwrap()
-            })
+            .map(|(id, wire)| (*id, wire.control.clone()))
             .collect();
-        LeaseSet::new(leases, Box::new(reservation))
+        self.factory
+            .open(topology, endpoints, &channels, grant, 1024)
     }
     pub(super) fn candidate(&self, backend: &FakeBackend) -> BackendCandidate {
         BackendCandidate::new(
@@ -389,23 +277,7 @@ impl Rig {
         }
     }
     pub(super) fn assert_released(&self) {
-        assert!(self.reserved.lock().unwrap().is_empty());
-        let log = self.log.lock().unwrap();
-        let reservation = log
-            .iter()
-            .rposition(|line| line == "reservation")
-            .expect("reservation dropped");
-        for endpoint in &self.endpoints {
-            let closed = log
-                .iter()
-                .rposition(|line| line == &format!("close:{endpoint}"))
-                .expect("channel closed");
-            let dropped = log
-                .iter()
-                .rposition(|line| line == &format!("drop:{endpoint}"))
-                .expect("I/O owner dropped");
-            assert!(closed < dropped && dropped < reservation);
-        }
+        self.factory.assert_released();
     }
 }
 
@@ -432,6 +304,7 @@ pub(super) struct FakeBackend {
     descriptor: BackendDescriptor,
     profile: Profile,
     pub(super) exclusive: bool,
+    pub(super) support_override: Option<(Op, Support)>,
 }
 impl FakeBackend {
     pub(super) fn new(profile: Profile, updates: UpdateStrategy) -> Self {
@@ -439,6 +312,7 @@ impl FakeBackend {
             descriptor: BackendDescriptor::new("synthetic.protocol", updates).unwrap(),
             profile,
             exclusive: false,
+            support_override: None,
         }
     }
 }
@@ -489,8 +363,10 @@ impl Backend for FakeBackend {
             routes: context.component_routes().collect(),
             primary: context.primary(),
             stage: 0,
+            decoders: BTreeMap::new(),
             pending: None,
             profile: self.profile,
+            support_override: self.support_override,
             updates: self.descriptor.updates(),
             exclusive: self.exclusive,
             configuration_matches,
@@ -521,18 +397,109 @@ enum Read {
 struct Pending {
     id: RequestId,
     read: Read,
-    sent: bool,
+    sent: usize,
 }
 struct WireProtocol {
     sources: Vec<EndpointId>,
     primary: EndpointId,
     routes: BTreeMap<ComponentId, EndpointId>,
     stage: usize,
+    decoders: BTreeMap<EndpointId, Decoder>,
     pending: Option<Pending>,
     profile: Profile,
+    support_override: Option<(Op, Support)>,
     updates: UpdateStrategy,
     exclusive: bool,
     configuration_matches: bool,
+}
+
+#[derive(Default)]
+struct Decoder {
+    header: [u8; 2],
+    header_read: usize,
+    payload: Vec<u8>,
+    payload_read: usize,
+}
+impl Decoder {
+    fn poll(
+        &mut self,
+        cx: &mut Context<'_>,
+        channel: &mut crate::transport::TransportLease,
+        bound: usize,
+    ) -> Poll<Result<Vec<u8>>> {
+        for _ in 0..8 {
+            let header = self.header_read < 2;
+            let buffer = if header {
+                &mut self.header[self.header_read..]
+            } else {
+                &mut self.payload[self.payload_read..]
+            };
+            let size = match channel.poll_io(cx, IoRequest::SerialRead(buffer)) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(result) => result?,
+            };
+            if size == 0 {
+                let incomplete = self.header_read > 0;
+                return Poll::Ready(Err(BackendError::new(
+                    if incomplete {
+                        FailureKind::Protocol
+                    } else {
+                        FailureKind::Disconnected
+                    },
+                    if incomplete {
+                        "EOF truncated a synthetic frame"
+                    } else {
+                        "EOF before a synthetic frame"
+                    },
+                )
+                .context(
+                    "synthetic.protocol",
+                    error::Phase::Read,
+                    None,
+                    Some(channel.endpoint()),
+                )
+                .caused_by(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "synthetic stream ended",
+                ))));
+            }
+            if header {
+                self.header_read += size;
+                if self.header_read == 2 {
+                    let length = usize::from(u16::from_le_bytes(self.header));
+                    if length == 0 || length > bound {
+                        return Poll::Ready(Err(BackendError::new(
+                            if length == 0 {
+                                FailureKind::Protocol
+                            } else {
+                                FailureKind::ResourceLimit
+                            },
+                            "invalid synthetic frame length",
+                        )
+                        .context(
+                            "synthetic.protocol",
+                            error::Phase::Read,
+                            None,
+                            Some(channel.endpoint()),
+                        )));
+                    }
+                    self.payload.resize(length, 0);
+                }
+            } else {
+                self.payload_read += size;
+                if self.payload_read == self.payload.len() {
+                    let payload = std::mem::take(&mut self.payload);
+                    self.header_read = 0;
+                    self.payload_read = 0;
+                    return Poll::Ready(Ok(payload));
+                }
+            }
+        }
+        // A ready one-byte source can require several polls for a long frame.
+        // Yield with a wake rather than monopolizing one executor turn.
+        cx.waker().wake_by_ref();
+        Poll::Pending
+    }
 }
 
 fn battery(level: u16) -> Result<DeviceObservation> {
@@ -577,6 +544,13 @@ impl WireProtocol {
             Profile::Unknown => vec![],
             Profile::Unsupported => vec![(Op::ReadBattery, Support::Unsupported)],
         };
+        if let Some((operation, support)) = self.support_override {
+            if let Some((_, current)) = entries.iter_mut().find(|(op, _)| *op == operation) {
+                *current = support;
+            } else {
+                entries.push((operation, support));
+            }
+        }
         if matches!(
             self.updates,
             UpdateStrategy::Push | UpdateStrategy::Hybrid { .. }
@@ -600,11 +574,7 @@ impl WireProtocol {
                 "wire request already pending",
             ));
         }
-        self.pending = Some(Pending {
-            id,
-            read,
-            sent: false,
-        });
+        self.pending = Some(Pending { id, read, sent: 0 });
         Ok(())
     }
     fn connect(
@@ -620,15 +590,15 @@ impl WireProtocol {
             )));
         }
         let source = self.sources[self.stage];
-        let mut buffer = vec![0; max_frame];
-        let size = match channels
-            .channel(source)?
-            .poll_io(cx, IoRequest::SerialRead(&mut buffer))
-        {
+        let payload = match self.decoders.entry(source).or_default().poll(
+            cx,
+            channels.channel(source)?,
+            max_frame,
+        ) {
             Poll::Pending => return Poll::Pending,
             Poll::Ready(result) => result?,
         };
-        if buffer[..size] != [0x7e] {
+        if payload != [0x7e] {
             return Poll::Ready(Err(BackendError::new(
                 FailureKind::Protocol,
                 "invalid synthetic handshake",
@@ -654,7 +624,7 @@ impl WireProtocol {
             .map(|pending| self.source_for(pending.read))
             .transpose()?;
         if let Some(pending) = &mut self.pending
-            && !pending.sent
+            && pending.sent < 2
         {
             let command = match pending.read {
                 Read::Battery(_) => 0x10,
@@ -663,27 +633,42 @@ impl WireProtocol {
             };
             match channels
                 .channel(request_source.expect("pending request source"))?
-                .poll_io(cx, IoRequest::SerialWrite(&[command]))
+                .poll_io(cx, IoRequest::SerialWrite(&[command, 0][pending.sent..]))
             {
-                Poll::Pending => return Poll::Pending,
+                // Serial lanes are independent: unsolicited input can progress
+                // even when output is gated or only partially accepted.
+                Poll::Pending => {}
                 Poll::Ready(result) => {
-                    result?;
-                    pending.sent = true;
+                    let size = result?;
+                    if size == 0 {
+                        return Poll::Ready(Err(BackendError::new(
+                            FailureKind::Protocol,
+                            "zero progress writing a nonempty synthetic command",
+                        )
+                        .caused_by(std::io::Error::new(
+                            std::io::ErrorKind::WriteZero,
+                            "zero-byte command write",
+                        ))));
+                    }
+                    pending.sent += size;
+                    if pending.sent < 2 {
+                        cx.waker().wake_by_ref();
+                    }
                 }
             }
         }
-        // The fake has one bounded frame per transport read, so there is no
-        // unbounded decoder accumulation or request-only input path.
+        // Each endpoint retains incomplete framing state. Transport chunking is
+        // never interpreted as a protocol message boundary.
         for source in &self.sources {
-            let mut buffer = vec![0; max_frame];
-            let size = match channels
-                .channel(*source)?
-                .poll_io(cx, IoRequest::SerialRead(&mut buffer))
-            {
+            let buffer = match self.decoders.entry(*source).or_default().poll(
+                cx,
+                channels.channel(*source)?,
+                max_frame,
+            ) {
                 Poll::Pending => continue,
                 Poll::Ready(result) => result?,
             };
-            let frame = &buffer[..size];
+            let frame = buffer.as_slice();
             if let [0xa0, level] = frame {
                 let Some(component) = self.component_for(*source) else {
                     return Poll::Ready(Err(BackendError::new(
@@ -762,6 +747,12 @@ impl WireProtocol {
                     "unmatched wire reply",
                 )));
             };
+            if pending.sent != 2 {
+                return Poll::Ready(Err(BackendError::new(
+                    FailureKind::Protocol,
+                    "reply arrived before command transmission completed",
+                )));
+            }
             let value = match frame {
                 [0x90, level] => ReplyValue::Observation(battery(u16::from(*level))?),
                 [0x94, level] => ReplyValue::Observation(DeviceObservation::Patch(
