@@ -184,6 +184,8 @@ impl Document {
             members.sort_by(|a, b| a["syspath"].as_str().cmp(&b["syspath"].as_str()));
             json!({"id": group.id.to_string(), "syspath": path(&group.descriptor.key.0),
                 "display_name": view.name, "selector": view.selector, "grouping": view.grouping,
+                "user_selector": view.user_selector, "model_label": group.descriptor.model_label,
+                "product": metadata(&group.descriptor.product, |p| json!(p)),
                 "classification": {"kind": view.class.name()}, "origin": view.origin.name(), "location": view.location.name(),
                 "usb": metadata(&group.descriptor.usb, |usb| json!({"vendor": usb.vendor, "product": usb.product})),
                 "serial": metadata(&group.descriptor.serial, |s| json!(s)),
@@ -211,6 +213,7 @@ impl Document {
         indicators.sort_by(|a, b| a["syspath"].as_str().cmp(&b["syspath"].as_str()));
         let grouped: Vec<_> = catalog.devices.iter().filter(|d| d.has_indicators() || selected_group.is_some()).map(|d| json!({
             "device_id": d.group.id.to_string(), "display_name": d.name, "selector": d.selector, "grouping": d.grouping,
+            "user_selector": d.user_selector,
             "classification": {"kind": d.class.name()}, "origin": d.origin.name(), "location": d.location.name(),
             "endpoint_ids": d.endpoints.iter().filter(|e| e.applicable || e.host.is_some()).map(|e| e.endpoint.id.to_string()).collect::<Vec<_>>(),
             "locks": {"caps_lock": d.lock(HostLock::Caps), "num_lock": d.lock(HostLock::Num), "scroll_lock": d.lock(HostLock::Scroll)}
@@ -240,9 +243,15 @@ impl Document {
             "scope": if selected_group.is_some() { "selected_device" } else if all_inputs { "all_inputs" } else { "keyboards" },
             "total_input_groups": total_inputs, "recognized_keyboards": keyboard_count, "shown_groups": catalog.devices.len(),
         }));
+        // Human ordering follows readable handles; existing machine arrays retain their established ordering.
+        let mut human_devices = catalog.devices;
+        human_devices.sort_by(|a, b| {
+            (&a.user_selector.id, &a.group.descriptor.key)
+                .cmp(&(&b.user_selector.id, &b.group.descriptor.key))
+        });
         Ok(Self {
             human_view: Some(human::View {
-                devices: catalog.devices,
+                devices: human_devices,
                 discovery: discovery_status,
                 notices,
                 selected_endpoint,

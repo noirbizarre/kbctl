@@ -349,6 +349,58 @@ fn denied_placement_metadata_preserves_keyboard_classification_and_reports_unkno
     );
     assert!(scan.problems.iter().any(|p| p.path.ends_with("removable")));
 }
+
+#[test]
+fn usb_product_names_are_group_metadata_and_are_not_inherited_from_a_bluetooth_radio() {
+    let temp = tempfile::tempdir().unwrap();
+    let sys = temp.path().join("sys");
+    add_node(&sys, "usb1/1-1", 0, "0003\n");
+    add_node(&sys, "usb1/1-1", 1, "0003\n");
+    let bluetooth = add_node(&sys, "usb1/radio", 2, "0005\n");
+    write(sys.join("devices/usb1/1-1/product"), "Readable USB Model\n");
+    write(
+        sys.join("devices/usb1/radio/product"),
+        "Radio name is not a keyboard model\n",
+    );
+    let scan = Collector::new(TreeReader, sys, Some(64)).scan();
+    assert!(scan.complete && scan.problems.is_empty());
+    assert_eq!(
+        scan.groups
+            .iter()
+            .filter(|g| g.product.known().is_some())
+            .count(),
+        1
+    );
+    assert!(
+        scan.groups
+            .iter()
+            .any(|g| g.product.known().map(String::as_str) == Some("Readable USB Model"))
+    );
+    assert_eq!(
+        scan.groups
+            .iter()
+            .find(|g| g.key.0 == bluetooth)
+            .unwrap()
+            .product,
+        Metadata::Missing
+    );
+}
+
+#[test]
+fn failed_usb_product_text_preserves_discovery_and_its_actionable_metadata_diagnostic() {
+    let temp = tempfile::tempdir().unwrap();
+    let sys = temp.path().join("sys");
+    add_node(&sys, "usb1/1-1", 0, "0003\n");
+    let product = sys.join("devices/usb1/1-1/product");
+    write(&product, &format!("{}\n", "x".repeat(4097)));
+    let scan = Collector::new(TreeReader, sys, Some(64)).scan();
+    assert!(scan.complete);
+    assert_eq!(scan.endpoints.len(), 1);
+    assert!(
+        matches!(&scan.groups[0].product, Metadata::Failed(p) if p.kind == ProblemKind::Malformed && p.path == product)
+    );
+    assert!(scan.problems.iter().any(|p| p.path == product));
+}
 #[test]
 fn usb_siblings_share_an_attachment_but_duplicate_serials_and_bluetooth_do_not_merge_units() {
     let temp = tempfile::tempdir().unwrap();

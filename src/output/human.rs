@@ -240,7 +240,7 @@ impl<W: Write> Renderer<'_, W> {
                 } else if d.location != InputLocation::Unknown {
                     path.push_str(&format!(" [{}]", d.location.name()));
                 }
-                (safe(&d.name), d.selector.id.as_str(), safe(&path))
+                (safe(&d.name), d.user_selector.id.as_str(), safe(&path))
             })
             .collect();
         let natural_name_width = rows
@@ -253,7 +253,8 @@ impl<W: Write> Renderer<'_, W> {
             .iter()
             .map(|r| measure_text_width(r.1))
             .max()
-            .unwrap_or(2);
+            .unwrap_or(8)
+            .max(8);
         let path_width = rows
             .iter()
             .map(|r| measure_text_width(&r.2))
@@ -270,7 +271,7 @@ impl<W: Write> Renderer<'_, W> {
         if table {
             self.heading(&format!(
                 "{:<name_width$}  {:<id_width$}  PATH",
-                "NAME", "ID"
+                "NAME", "SELECTOR"
             ))?;
             for (name, id, path) in &rows {
                 let name = truncate_str(name, name_width, "...");
@@ -324,22 +325,25 @@ impl<W: Write> Renderer<'_, W> {
         Ok(())
     }
     fn selector_notes(&mut self, devices: &[DeviceView]) -> io::Result<()> {
-        if devices.iter().any(|d| d.selector.kind == "usb_serial") {
+        if !devices.is_empty() {
             writeln!(
                 self.writer,
-                "usb-* IDs use advertised USB serial evidence, not verified unit identity."
+                "Readable handles are inventory-relative; --verbose shows qualified aliases and identity evidence."
             )?;
         }
-        if devices.iter().any(|d| d.selector.kind == "attachment") {
+        if devices
+            .iter()
+            .any(|d| d.user_selector.stability == "attachment_scoped")
+        {
             writeln!(
                 self.writer,
-                "attachment-* IDs are locator-scoped; reconnect stability is not guaranteed."
+                "--at- qualifiers follow attachment topology; persistence across reconnects is not guaranteed."
             )?;
         }
-        if devices.iter().any(|d| d.selector.ambiguous) {
+        if devices.iter().any(|d| d.user_selector.ambiguous) {
             writeln!(
                 self.writer,
-                "Ambiguous IDs: use --verbose for attachment fallbacks; duplicate IDs never select the first device."
+                "Ambiguous selectors: inspect identity evidence and locators; matching never selects the first device."
             )?;
         }
         if devices.iter().any(|d| d.grouping == "uncertain_attachment") {
@@ -352,13 +356,13 @@ impl<W: Write> Renderer<'_, W> {
     }
     fn device_heading(&mut self, device: &DeviceView) -> io::Result<()> {
         let name = safe(&device_name(device, false));
-        let combined = format!("{name} ({})", device.selector.id);
+        let combined = format!("{name} ({})", device.user_selector.id);
         if measure_text_width(&combined) <= self.options.width {
             writeln!(
                 self.writer,
                 "{} ({})",
                 self.styled(&name, Style::new().bold()),
-                self.styled(&device.selector.id, Style::new().cyan())
+                self.styled(&device.user_selector.id, Style::new().cyan())
             )?;
         } else {
             writeln!(
@@ -372,7 +376,7 @@ impl<W: Write> Renderer<'_, W> {
             writeln!(
                 self.writer,
                 "  {}",
-                self.styled(&device.selector.id, Style::new().cyan())
+                self.styled(&device.user_selector.id, Style::new().cyan())
             )?;
         }
         Ok(())
@@ -479,7 +483,30 @@ impl<W: Write> Renderer<'_, W> {
     ) -> io::Result<()> {
         self.device_heading(device)?;
         self.heading("Identity evidence")?;
-        self.label("Selector", &device.selector.id)?;
+        self.label("Display name", &device.name)?;
+        self.label("User selector", &device.user_selector.id)?;
+        self.label("Model slug", &device.user_selector.slug)?;
+        self.label("Naming source", device.user_selector.name_source)?;
+        self.label("Selector stability", device.user_selector.stability)?;
+        self.label("Qualified alias", &device.user_selector.qualified)?;
+        self.label(
+            "Qualified stability",
+            device.user_selector.qualified_stability,
+        )?;
+        self.label(
+            "Disambiguation evidence",
+            device.user_selector.disambiguation,
+        )?;
+        self.label(
+            "Readable ambiguity",
+            &device.user_selector.ambiguous.to_string(),
+        )?;
+        self.label(
+            "Qualified ambiguity",
+            &device.user_selector.qualified_ambiguous.to_string(),
+        )?;
+        self.heading("Technical identity aliases")?;
+        self.label("Legacy evidence selector", &device.selector.id)?;
         self.label(
             "Evidence",
             &format!(
@@ -500,6 +527,20 @@ impl<W: Write> Renderer<'_, W> {
             "Advertised serial",
             &device.group.descriptor.serial,
             Clone::clone,
+        )?;
+        self.metadata(
+            "USB product",
+            &device.group.descriptor.product,
+            Clone::clone,
+        )?;
+        self.label(
+            "Registry model label",
+            device
+                .group
+                .descriptor
+                .model_label
+                .as_deref()
+                .unwrap_or("not identified"),
         )?;
         self.label(
             "Registry identification",

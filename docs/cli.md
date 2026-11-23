@@ -9,9 +9,9 @@ diagnostic. Management protocol backends and D-Bus integration are separate work
 ```sh
 kbctl device list
 kbctl device list --all
-kbctl device inspect usb-15ac7a64ff726c151efde8b1cbf1218e
+kbctl device inspect gmmk-pro
 kbctl indicator status
-kbctl indicator status --device usb-15ac7a64ff726c151efde8b1cbf1218e
+kbctl indicator status --device dygma-defy
 kbctl --verbose indicator status
 kbctl indicator watch
 kbctl status
@@ -19,24 +19,26 @@ kbctl --json device list
 kbctl indicator watch --json
 ```
 
-The example selector is synthetic; copy an ID actually printed by `device list`.
+The examples are illustrative; copy a selector actually printed by `device list`. Reviewed model labels may include a
+brand or variant, such as `glorious-gmmk-pro` or `dygma-defy-wired`.
 
-`device list` shows a compact NAME / ID / PATH table, grouping sibling endpoints rather than repeating kernel nodes.
+`device list` shows a compact NAME / SELECTOR / PATH table, grouping sibling endpoints rather than repeating kernel nodes.
 The path is a current locator; `(+N)` counts additional endpoints. Defaults include positively recognized typing keyboards,
 including virtual typing keyboards, and hide partial/other/unknown devices. `device list --all` shows every input group
 with explicit classification and placement labels; inspect can still address any group. Narrow terminals use stacked
 rows, keeping selectors complete for copying. For example:
 
 ```text
-NAME                ID                                    PATH
-Synthetic keyboard  usb-15ac7a64ff726c151efde8b1cbf1218e  /dev/input/event0 (+1)
+NAME        SELECTOR     PATH
+GMMK Pro    gmmk-pro     /dev/input/event0 (+1)
+Dygma Defy  dygma-defy   /dev/input/event2 (+1)
 ```
 
 `--verbose` (or `-v`) expands list/status/watch with endpoint and metadata diagnostics. `device inspect` is always detailed,
 with identity evidence, grouping/runtime identity, endpoint locators, classification, kernel identifiers and capabilities
-in named sections. It accepts canonical IDs and attachment fallbacks. Exact group/endpoint sysfs paths and event-node
+in named sections. It accepts readable handles, qualified aliases and legacy technical selectors. Exact sysfs/event-node
 paths remain accepted for transient inspection, for example `kbctl device inspect /dev/input/event0`. They are not
-persistent selectors. Human names and process-local runtime IDs are not accepted as selectors; names need not be unique.
+persistent selectors. Full display names and process-local runtime IDs are not accepted as selectors.
 Missing or ambiguous selection is an actionable error rather than selecting the first match.
 
 ### Keyboard classification and placement
@@ -75,21 +77,65 @@ for diagnostic visibility. Filtering never removes discovery records or hides se
 
 ### Selector evidence and persistence
 
+- **Display name** is a label for reading; it can change and need not be unique.
+- **User selector** is an inventory-aware handle for selecting a current grouped attachment. It is not hardware identity.
+- **Hardware evidence** includes model metadata, USB IDs, optional/nonunique advertised serial and attachment topology.
+- **Technical/runtime identifiers** include the existing evidence selectors, process-local IDs and current event/sysfs paths.
+
+Readable model bases prefer a reviewed registry model label, then USB product metadata. A positively internal physical
+typing keyboard without model metadata gets `internal-keyboard`. Otherwise a deterministic raw kernel-name fallback is
+used, preferring typing then partial endpoints and ordering names independently of event numbers. Kernel-name fallback
+is explicitly weak; changing that label can change the handle. Rendered display labels are never used as identity input.
+
+Normalization lowercases ASCII letters/digits, collapses other characters to one hyphen, trims separators, and limits the
+slug to 40 ASCII characters. It does not transliterate Unicode; original names remain visible. Punctuation/Unicode-only
+or missing text falls through to another source, then a generic class/origin basis such as `keyboard`, `virtual-keyboard`,
+`keypad` or `input-device`. Generic fallbacks always use a qualified selector. Double hyphens are reserved for generated
+qualifiers, and the old full `usb-*`/`attachment-*` evidence-ID namespaces cannot become ordinary model aliases.
+
+- A unique model gets a bare handle such as `gmmk-pro`. This is **inventory-relative**: adding a second identical model
+  makes the bare handle ambiguous. Matching considers the full inventory, including hidden input groups.
+- Every group also has a qualified readable alias, available under `--verbose`, inspect and JSON even while its bare handle
+  is unique. Duplicates use that qualified form in the default SELECTOR column.
+- `gmmk-pro--a1b2c3d4` uses the model basis plus uniquely observed namespaced advertised serial evidence. The token reuses
+  the legacy USB digest described below. It stays usable across reconnects/port moves/renumbering while model and evidence
+  remain unchanged and the suffix remains unambiguous; this is not verified unit identity or proof of global uniqueness.
+- `gmmk-pro--at-a1b2c3d4` explicitly uses current attachment topology when serial evidence is missing, blank, failed or
+  duplicated. It is **not** a persistence guarantee; the same port can later contain another device. Internal laptop
+  keyboards frequently have this weaker qualified alias even when the unique `internal-keyboard` role handle is convenient.
+- Tokens start at eight hex characters and extend through 12, 16, 24 and 32 characters when needed to avoid prefix
+  collisions. Full-token collisions remain explicit ambiguity, never first-match selection or runtime-ID/order suffixes.
+  Adding a colliding device can extend a qualified alias; model/registry-label changes can also change readable handles.
+- Querying an ambiguous base fails with names, qualified readable candidates, stability and transient inspection locators.
+  There is no fuzzy display-name matching, persistent configuration or user-managed alias database.
+
+### Legacy selectors and script migration
+
+Existing technical selectors retain their values and continue to resolve through the same service:
+
 - `usb-<32 hex digits>` uses the USB vendor/product IDs and a nonblank **advertised** serial. It stays the same across
   disconnect/reconnect, port changes and event-node renumbering while that evidence remains the same. It is not verified
   unit identity, evidence of ownership, or permission to pair devices. Case and spaces in the serial are significant.
 - `attachment-<32 hex digits>` is the explicit fallback when USB/serial evidence is absent, blank or failed. It derives
   from the current group sysfs locator and has **no reconnect-stability or hardware-uniqueness guarantee**. The same path
   can later refer to another device. A fallback is also available for every advertised selector via inspect/verbose output.
-- Duplicate advertised identities remain separate attachments with an ambiguous canonical ID. Use their attachment
-  fallbacks for a current query. Duplicate IDs or shortened-digest collisions never silently resolve to one device.
+- Duplicate advertised identities remain separate attachments with an ambiguous evidence ID. Use the qualified readable
+  topology alias or technical attachment fallback for a current query. Duplicate IDs never silently resolve to one device.
   Ambiguity is relative to the current inventory; incomplete discovery cannot establish global uniqueness.
 
-Selector derivation v1 is deterministic: SHA-256 over `kbctl/selector/v1/usb` followed by a zero byte, then three fields,
+Legacy selector derivation v1 is unchanged: SHA-256 over `kbctl/selector/v1/usb` followed by a zero byte, then three fields,
 each prefixed with its unsigned 64-bit big-endian byte length. Fields are the two-byte big-endian vendor ID, two-byte
 big-endian product ID, and exact UTF-8 serial. The first 16 digest bytes become lowercase hex after `usb-`. Fallbacks use
 the namespace `kbctl/selector/v1/attachment` and one field containing the current locator's OS-encoded bytes, prefixed
 in the same way. Runtime IDs, names, event-node paths and enumeration order never enter the advertised selector.
+
+Scripts using `selector.id` need no field migration. New integrations should use `user_selector.id` for the displayed
+handle or `user_selector.qualified` for evidence-qualified selection, observing its stability/ambiguity metadata. Keep the
+legacy USB alias when selection must remain independent of changing model descriptions; its advertised evidence can still
+be absent or nonunique. Schema-v1 `id` remains a process-local runtime ID, not the readable selector.
+
+Static shell completions and help describe SELECTOR arguments with non-path value hints. They do not enumerate connected
+devices or run discovery; completion support follows each shell generator. Transient inspection paths still parse normally.
 
 Device commands use metadata only: event-stream access is **not checked** and no indicator node is opened. Indicator
 commands collect from positive typing endpoints and justified LED-reporting siblings in a confirmed keyboard attachment;
@@ -172,10 +218,18 @@ with discovery health. Each source has endpoint locators, scope, availability an
 `problems` preserves collector diagnostics, including initialization/fallback warnings; it describes the most recent
 host turn (all initial collection turns for a one-shot query). Continuing source/metadata failures also live in state.
 
-Device records additionally include `display_name`, qualified `selector` metadata (`id`, `kind`, `verification`,
-`ambiguous`, `fallback`, `fallback_ambiguous`, `reason`) and `grouping`. `usb_serial` means advertised evidence;
-`attachment` means locator-scoped fallback. `grouping` is `usb_attachment`, `input_attachment` or `uncertain_attachment`,
+Device records include separate `display_name`, readable `user_selector`, and legacy `selector` metadata (`id`, `kind`,
+`verification`, `ambiguous`, `fallback`, `fallback_ambiguous`, `reason`) and `grouping`.
+`usb_serial` means advertised evidence; `attachment` means locator-scoped fallback.
+`grouping` is `usb_attachment`, `input_attachment` or `uncertain_attachment`,
 never a claim of chassis identity. Existing numeric-string `id` fields remain process-local.
+
+`user_selector` contains primary `id`, base `slug`, always-present `qualified` alias, nullable `bare_alias`, `bare_ambiguous`,
+`name_source`, `disambiguation`, `stability`, `qualified_stability`, `ambiguous` and `qualified_ambiguous`. Generic or
+reserved aliases may have no bare form. Ambiguity flags refer to each form; exact resolution still checks every accepted
+alias. Stability is `inventory_relative`, `model_and_advertised_serial`, `label_and_advertised_serial` or `attachment_scoped`.
+Naming sources are `registry_model`, `usb_product`, `internal_placement`, `kernel_name` or `generic`.
+`model_label` and tagged raw `product` metadata preserve the naming inputs without overloading display/runtime fields.
 
 Group records and grouped indicator summaries add `classification.kind`, `origin` and `location`. Endpoint records retain
 the schema-v1 `keyboard` boolean/unknown projection and `classification_property`; richer `classification` provides `kind`,
@@ -184,10 +238,12 @@ Placement includes its qualified reason. These additions preserve field shapes a
 scope is now keyboard-first, with the complete previous inventory accessible explicitly through `--all`.
 
 `indicators.devices` adds per-attachment summaries, referencing `device_id` and contributing `endpoint_ids`, plus the same
-name/selector/grouping fields. Each lock has `state`, nullable `value` and distinct `contributing` state/value pairs.
+name/user-selector/technical-selector/grouping fields. Each lock has `state`, nullable `value` and distinct
+`contributing` state/value pairs.
 Only unanimously fresh known observations produce a non-null summary boolean. Mixed, disagreement and other uncertain
 summaries have null values; raw endpoint reports and history remain unchanged in `indicators.sources`. Existing schema-v1
-fields and endpoint scope are preserved. Grouped summaries use selector order; existing arrays retain sysfs-path ordering.
+fields and endpoint scope are preserved. Grouped summaries retain legacy technical-selector order, and existing device/
+endpoint/source arrays retain sysfs-path ordering. Human rows follow readable-selector order.
 
 Fatal failures produce `event: "error"` and an `error` object with stable diagnostic `code`, `message` and actionable
 `help`, rather than `data`. For example, with unset runtime storage:

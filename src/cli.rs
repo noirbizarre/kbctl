@@ -50,17 +50,20 @@ pub enum DeviceCommand {
     },
     /// Inspect a device selector (or a current sysfs/event-node locator).
     #[command(
-        after_help = "Use the ID printed by `kbctl device list`.\nExample: kbctl device inspect usb-0123456789abcdef0123456789abcdef\nTransient inspection also accepts /dev/input/event0 or an exact sysfs path."
+        after_help = "Use the readable selector printed by `kbctl device list`.\nExample: kbctl device inspect gmmk-pro\nLegacy technical selectors remain accepted. Transient inspection also accepts /dev/input/event0 or an exact sysfs path."
     )]
-    Inspect { device: std::path::PathBuf },
+    Inspect {
+        #[arg(value_name = "SELECTOR", value_hint = clap::ValueHint::Other)]
+        device: std::path::PathBuf,
+    },
 }
 
 #[derive(Debug, Subcommand)]
 pub enum IndicatorCommand {
     /// Query device-grouped kernel indicator state; --verbose shows endpoints.
     Status {
-        /// Select a device-list ID; use `device list --all` to find partial keyboards (fallbacks are transient).
-        #[arg(long, value_name = "SELECTOR")]
+        /// Select a readable device handle (e.g. dygma-defy); --all listing also exposes partial keyboards.
+        #[arg(long, value_name = "SELECTOR", value_hint = clap::ValueHint::Other)]
         device: Option<String>,
     },
     /// Watch initial state and changes until Ctrl-C (NDJSON when piped with --json).
@@ -112,5 +115,28 @@ mod tests {
             }
         ));
         assert!(Cli::try_parse_from(["kbctl", "indicator", "status", "--all"]).is_err());
+    }
+
+    #[test]
+    fn selector_arguments_have_explicit_non_path_completion_hints() {
+        let command = Cli::command();
+        let inspect = command
+            .find_subcommand("device")
+            .unwrap()
+            .find_subcommand("inspect")
+            .unwrap();
+        let status = command
+            .find_subcommand("indicator")
+            .unwrap()
+            .find_subcommand("status")
+            .unwrap();
+        for command in [inspect, status] {
+            let selector = command
+                .get_arguments()
+                .find(|arg| arg.get_id() == "device")
+                .unwrap();
+            assert_eq!(selector.get_value_hint(), clap::ValueHint::Other);
+            assert_eq!(selector.get_value_names().unwrap(), ["SELECTOR"]);
+        }
     }
 }

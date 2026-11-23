@@ -31,7 +31,7 @@ pub(crate) enum Error {
     #[diagnostic(
         code(kbctl::cli::device_selection),
         help(
-            "Run `kbctl device list` (or `device list --all` for partial/other inputs) and use its device selector. For ambiguous advertised identity, use the attachment fallback shown below or in verbose listing. Attachment selectors and inspection paths are transient; process-local IDs are not selectors."
+            "Run `kbctl device list` (or `device list --all` for partial/other inputs) and use its readable selector. If a model handle is ambiguous, choose a qualified alias from the candidates or --verbose output. Topology qualifiers and inspection paths are transient; runtime IDs are not selectors."
         )
     )]
     Selection {

@@ -212,6 +212,8 @@ impl<R: Reader> Collector<R> {
             incarnation: Some(group_before.clone()),
             usb: Metadata::Missing,
             serial: Metadata::Missing,
+            product: Metadata::Missing,
+            model_label: None,
             identification: Identification::Unknown,
         };
         if usb.is_some() {
@@ -228,6 +230,7 @@ impl<R: Reader> Collector<R> {
                 _ => Metadata::Missing,
             };
             group.serial = self.text(&group_path.join("serial"));
+            group.product = self.text(&group_path.join("product"));
         }
         let capabilities = Capabilities {
             events: self.bits(&input.join("capabilities/ev")),
@@ -306,6 +309,7 @@ impl<R: Reader> Collector<R> {
         }
         collect(&group.usb, &mut problems);
         collect(&group.serial, &mut problems);
+        collect(&group.product, &mut problems);
         collect(&endpoint.devnode, &mut problems);
         for value in [
             &endpoint.name,

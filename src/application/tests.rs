@@ -499,10 +499,17 @@ fn canonical_selection_is_shared_by_inspection_and_both_indicator_output_formats
     let fixture = crate::test_support::input::devices();
     let listing = FakeHost::new(fixture.clone(), false).run(&Operation::Devices);
     let listed = &data(&listing[0])["devices"][0];
-    let selector = listed["selector"]["id"].as_str().unwrap().to_owned();
+    let selector = listed["user_selector"]["id"].as_str().unwrap().to_owned();
     let inspected =
         FakeHost::new(fixture.clone(), false).run(&Operation::Inspect(selector.clone().into()));
-    assert_eq!(data(&inspected[0])["device"]["selector"]["id"], selector);
+    assert_eq!(
+        data(&inspected[0])["device"]["user_selector"]["id"],
+        selector
+    );
+    assert_eq!(
+        data(&inspected[0])["device"]["selector"],
+        listed["selector"]
+    );
     assert_ne!(data(&inspected[0])["device"]["id"], listed["id"]);
     for chosen in [None, Some(selector.clone())] {
         let documents = FakeHost::new(fixture.clone(), true).run(&Operation::Indicators {
@@ -530,7 +537,8 @@ fn canonical_selection_is_shared_by_inspection_and_both_indicator_output_formats
         assert_eq!(text.matches("Caps Lock").count(), groups.len());
         for group in groups {
             assert_eq!(group["locks"]["caps_lock"]["state"], "disagreement");
-            assert!(text.contains(group["selector"]["id"].as_str().unwrap()));
+            assert!(text.contains(group["user_selector"]["id"].as_str().unwrap()));
+            assert!(!text.contains(group["selector"]["id"].as_str().unwrap()));
         }
         assert!(text.contains("disagreement (off, on)") || text.contains("disagreement (on, off)"));
         assert!(!text.contains("Host source"));
@@ -606,7 +614,7 @@ fn indicator_selection_rejects_ambiguous_ids_names_and_event_locators() {
                 json["error"]["message"]
                     .as_str()
                     .unwrap()
-                    .contains(device["selector"]["fallback"].as_str().unwrap())
+                    .contains(device["user_selector"]["qualified"].as_str().unwrap())
             );
         }
         assert!(host.stopped);
@@ -776,18 +784,24 @@ fn hidden_input_identity_still_participates_in_selector_ambiguity() {
     let devices = data(&listing[0])["devices"].as_array().unwrap();
     assert_eq!(devices.len(), 1);
     assert_eq!(devices[0]["selector"]["ambiguous"], true);
+    assert_eq!(devices[0]["user_selector"]["bare_ambiguous"], true);
     let selector = devices[0]["selector"]["id"].as_str().unwrap();
-    let mut host = FakeHost::new(fixture, true);
-    let error = execute(
-        &mut host,
-        &Operation::Indicators {
-            device: Some(selector.into()),
-        },
-        |_| Ok(()),
-    )
-    .unwrap_err();
-    assert!(matches!(error, Error::Selection { matches: 2, .. }));
-    assert_eq!(host.access.borrow().opens, 0);
+    for query in [
+        selector,
+        devices[0]["user_selector"]["slug"].as_str().unwrap(),
+    ] {
+        let mut host = FakeHost::new(fixture.clone(), true);
+        let error = execute(
+            &mut host,
+            &Operation::Indicators {
+                device: Some(query.into()),
+            },
+            |_| Ok(()),
+        )
+        .unwrap_err();
+        assert!(matches!(error, Error::Selection { matches: 2, .. }));
+        assert_eq!(host.access.borrow().opens, 0);
+    }
 }
 
 #[test]
@@ -818,6 +832,61 @@ fn an_uncertain_sibling_is_not_opened_but_prevents_a_false_unanimous_indicator_v
             .len(),
         2
     );
+}
+
+#[test]
+fn readable_handles_and_legacy_aliases_resolve_the_same_identity_layers_without_changing_json_fields()
+ {
+    let fixture = crate::test_support::input::inventory();
+    let listing = FakeHost::new(fixture.clone(), false).run(&Operation::Devices);
+    assert_eq!(listing[0].schema_version, 1);
+    for device in data(&listing[0])["devices"].as_array().unwrap() {
+        let name = device["display_name"].as_str().unwrap();
+        let readable = device["user_selector"]["id"].as_str().unwrap();
+        assert!(!readable.starts_with("usb-") && !readable.starts_with("attachment-"));
+        for alias in [
+            readable,
+            device["user_selector"]["qualified"].as_str().unwrap(),
+            device["selector"]["id"].as_str().unwrap(),
+            device["selector"]["fallback"].as_str().unwrap(),
+        ] {
+            let inspected =
+                FakeHost::new(fixture.clone(), false).run(&Operation::Inspect(alias.into()));
+            assert_eq!(data(&inspected[0])["device"]["display_name"], name);
+            assert_eq!(
+                data(&inspected[0])["device"]["selector"],
+                device["selector"]
+            );
+            assert_eq!(
+                data(&inspected[0])["device"]["user_selector"]["id"],
+                readable
+            );
+            let indicators = FakeHost::new(fixture.clone(), true).run(&Operation::Indicators {
+                device: Some(alias.into()),
+            });
+            assert_eq!(
+                data(&indicators[0])["indicators"]["devices"][0]["user_selector"]["id"],
+                readable
+            );
+        }
+    }
+}
+
+#[test]
+fn an_ambiguous_model_handle_reports_readable_candidates_before_any_collection() {
+    let fixture = crate::test_support::input::devices();
+    let mut host = FakeHost::new(fixture, true);
+    let operation = Operation::Indicators {
+        device: Some("synthetic-keyboard".into()),
+    };
+    let error = execute(&mut host, &operation, |_| Ok(())).unwrap_err();
+    assert!(matches!(error, Error::Selection { matches: 2, .. }));
+    assert!(
+        error
+            .to_string()
+            .contains("Synthetic keyboard: synthetic-keyboard--")
+    );
+    assert_eq!(host.access.borrow().opens, 0);
 }
 
 #[cfg(target_os = "linux")]

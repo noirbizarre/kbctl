@@ -1,4 +1,5 @@
 //! Snapshot queries and evidence-qualified CLI identities, never hardware pairing authority.
+use super::selectors::{self, UserSelector};
 use crate::{
     error::{Error, Result},
     input::classification::{self, Admission, CollectionScope},
@@ -184,6 +185,7 @@ pub(crate) struct DeviceView {
     pub(crate) group: InputDevice,
     pub(crate) name: String,
     pub(crate) selector: Selector,
+    pub(crate) user_selector: UserSelector,
     pub(crate) grouping: &'static str,
     pub(crate) class: InputClass,
     pub(crate) origin: InputOrigin,
@@ -315,6 +317,8 @@ impl Catalog {
                 group: group.as_ref().clone(),
                 name,
                 selector: selector(group, &hash),
+                // Filled inventory-wide before the catalog is exposed; aliases require all groups to detect ambiguity.
+                user_selector: UserSelector::default(),
                 grouping,
                 class,
                 origin,
@@ -335,6 +339,10 @@ impl Catalog {
         for device in &mut devices {
             device.selector.ambiguous = counts[&device.selector.id].len() > 1;
             device.selector.fallback_ambiguous = counts[&device.selector.fallback].len() > 1;
+        }
+        let handles = selectors::assign(&devices);
+        for (device, handle) in devices.iter_mut().zip(handles) {
+            device.user_selector = handle;
         }
         devices.sort_by(|a, b| {
             (&a.selector.id, &a.group.descriptor.key)
@@ -359,8 +367,11 @@ impl Catalog {
         let text = query.to_str();
         let mut matches = vec![];
         for device in &self.devices {
-            if text.is_some_and(|s| s == device.selector.id || s == device.selector.fallback)
-                || (allow_paths && device.group.descriptor.key.0 == query)
+            if text.is_some_and(|s| {
+                device.user_selector.matches(s)
+                    || s == device.selector.id
+                    || s == device.selector.fallback
+            }) || (allow_paths && device.group.descriptor.key.0 == query)
             {
                 matches.push(Selection {
                     device,
@@ -394,16 +405,22 @@ impl Catalog {
                 .iter()
                 .map(|d| {
                     format!(
-                        "  {} (attachment fallback: {}; locator: {})",
-                        d.selector.id,
-                        d.selector.fallback,
-                        d.group.descriptor.key.0.display()
+                        "  {}: {} (qualified alias: {}; {}; locator: {})",
+                        printable(&d.name),
+                        d.user_selector.id,
+                        d.user_selector.qualified,
+                        d.user_selector.qualified_stability,
+                        printable(&d.group.descriptor.key.0.to_string_lossy())
                     )
                 })
                 .collect::<Vec<_>>()
                 .join("\n"),
         })
     }
+}
+
+fn printable(text: &str) -> String {
+    text.chars().flat_map(|c| c.escape_debug()).collect()
 }
 
 fn selector(group: &InputDevice, hash: &impl Fn(&[u8]) -> String) -> Selector {

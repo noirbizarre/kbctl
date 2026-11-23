@@ -25,6 +25,7 @@ use crate::{
 };
 
 pub(crate) mod devices;
+pub(crate) mod selectors;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Operation {

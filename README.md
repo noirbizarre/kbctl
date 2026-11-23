@@ -44,17 +44,19 @@ Or download a binary for your platform from the
 kbctl --help
 kbctl device list
 kbctl device list --all
-kbctl device inspect usb-15ac7a64ff726c151efde8b1cbf1218e
+kbctl device inspect gmmk-pro
 kbctl status
 kbctl indicator status
-kbctl indicator status --device usb-15ac7a64ff726c151efde8b1cbf1218e
+kbctl indicator status --device dygma-defy
 kbctl --verbose indicator status
 kbctl --json indicator watch
 ```
 
-Use an ID printed by `device list`; the ID above illustrates its format.
+Copy a readable selector from `device list`; the examples illustrate model handles. Duplicate models get short evidence
+qualifiers, while `--verbose`/inspect show stability limits, qualified aliases and legacy technical IDs. Existing
+`usb-*`/`attachment-*` selectors remain accepted; JSON exposes the new handle separately as `user_selector`.
 
-On Linux, device commands show recognized typing keyboards by default, grouped by attachment with evidence-qualified
+On Linux, device commands show recognized typing keyboards by default, grouped by attachment with readable
 selectors. `device list --all` includes keypads, macro pads, other input devices and unknown classifications for diagnostics.
 Internal/external placement is shown when supported by platform evidence; virtual typing keyboards are labeled virtual.
 Partials are excluded from defaults but can be explicitly queried with `indicator status --device <selector>`.

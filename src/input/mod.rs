@@ -182,6 +182,16 @@ impl<S: Source> Service<S> {
                     serial: serial.as_ref(),
                 })
                 .identification;
+            // Carry the reviewed label with the snapshot; readers need not reconstruct a registry or use display names as identity.
+            group.model_label = match &group.identification {
+                crate::model::identity::Identification::Identified(id) => self
+                    .registry
+                    .definitions()
+                    .iter()
+                    .find(|definition| definition.id == *id)
+                    .map(|definition| definition.model.clone()),
+                _ => None,
+            };
         }
         let successful = scan.complete
             && scan.problems.is_empty()

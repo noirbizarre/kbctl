@@ -187,6 +187,7 @@ fn input_identification_uses_registry_usb_evidence_without_creating_a_route_or_k
     let (mut service, mut runtime, clock) = setup(source);
     service.step(clock.time(0), &mut runtime).unwrap();
     let snapshot = runtime.reader().snapshot().unwrap();
+    assert!(snapshot.records.values().any(|record| matches!(record.as_ref(), crate::model::state::StateRecord::InputDevice(device) if device.descriptor.model_label.as_deref() == Some(registry.definitions()[0].model.as_str()))));
     assert!(snapshot.records.values().any(|record| matches!(record.as_ref(), crate::model::state::StateRecord::InputDevice(device) if device.descriptor.identification != crate::model::identity::Identification::Unknown)));
     assert_eq!(runtime.topology().physical_devices().count(), 0);
     assert_eq!(runtime.topology().keyboards().count(), 0);

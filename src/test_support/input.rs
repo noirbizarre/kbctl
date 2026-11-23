@@ -29,6 +29,8 @@ pub(crate) fn scan() -> Scan {
                 product: 0x0001,
             }),
             serial: Metadata::Missing,
+            product: Metadata::Known("Synthetic keyboard".into()),
+            model_label: None,
             identification: Identification::Unknown,
         }],
         endpoints: vec![EndpointDescriptor {
@@ -136,6 +138,11 @@ pub(crate) fn inventory() -> Scan {
         let mut group = template.groups[0].clone();
         group.key = DiscoveryKey(format!("/sys/devices/fixture{index}").into());
         group.serial = Metadata::Known(format!("fixture-{index}"));
+        group.product = if index < 2 {
+            Metadata::Known(name.into())
+        } else {
+            Metadata::Missing
+        };
         let mut endpoint = template.endpoints[0].clone();
         endpoint.group = group.key.clone();
         endpoint.key = DiscoveryKey(group.key.0.join(format!("input{index}/event{index}")));

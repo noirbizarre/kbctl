@@ -135,7 +135,7 @@ fn duplicate_advertised_identity_is_ambiguous_without_merging_attachments() {
     let error = catalog.resolve(Path::new(selector), false).err().unwrap();
     assert!(matches!(&error, Error::Selection { matches: 2, .. }));
     for device in &catalog.devices {
-        assert!(error.to_string().contains(&device.selector.fallback));
+        assert!(error.to_string().contains(&device.user_selector.qualified));
         assert_eq!(
             catalog
                 .resolve(Path::new(&device.selector.fallback), false)

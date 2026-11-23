@@ -100,16 +100,20 @@ USB VID/PID, names, left/right labels, enumeration order, USB port paths and tra
 hardware identities. Identical metadata never automatically groups units. Keep unstable locators in `EndpointLocator`,
 not verified identity claims.
 
-The application catalog adds [CLI selectors](../cli.md#selector-evidence-and-persistence), separate from runtime and
-verified hardware identity. USB VID/PID plus advertised serial can provide an evidence-qualified persistent selector;
+The application catalog adds [readable CLI handles](../cli.md#selector-evidence-and-persistence), separate from display
+labels, runtime IDs and verified hardware identity. Model/product slugs are inventory-relative and disambiguated with
+qualified serial/topology evidence; legacy technical IDs remain accepted aliases. USB VID/PID plus advertised serial
+can provide an evidence-qualified persistent selector;
 missing evidence uses an explicit attachment-locator fallback. Neither grants reconciliation/pairing authority. Duplicate
 claims remain ambiguous and do not merge attachment groups; digest collisions are also rejected during resolution.
 
 ### Human-readable names
 
 `DisplayName` rejects blank text. Optional discovery names receive deterministic fallbacks such as `Unknown keyboard`,
-`Unknown physical device`, `Left half` or `Module`. Names need not be unique and never participate in matching.
+`Unknown physical device`, `Left half` or `Module`. Display names need not be unique and never participate in unit matching.
 Renaming a keyboard or physical unit changes neither runtime identity nor hardware evidence.
+Readable CLI handles may use an explicitly weak raw kernel-name fallback if model metadata is unavailable; this is a
+selection convenience, not domain identity reconciliation or permission to merge units.
 
 ## Connection and operation freshness
 

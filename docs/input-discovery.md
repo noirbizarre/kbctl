@@ -16,8 +16,10 @@ live attachments, not persistent hardware identity. A replacement gets fresh IDs
 advertised serials do not merge independent attachments. These fingerprints are continuity evidence, not an infallible
 history through arbitrary monitoring outages. Uncertain instances are renewed after a coverage gap.
 
-The CLI derives separate [evidence-qualified selectors](cli.md#selector-evidence-and-persistence): USB IDs plus advertised
-serial when available, otherwise an explicitly locator-scoped attachment fallback. These do not change runtime identity,
+The CLI derives [readable handles](cli.md#selector-evidence-and-persistence) separately from display/runtime identity, with
+evidence-qualified aliases for duplicates. Naming metadata includes fallible USB product text and the resolved registry
+model label; names never affect capability classification. Existing USB/serial and attachment-digest selectors remain
+technical compatibility aliases. These do not change runtime identity,
 verify serial claims, establish chassis boundaries or merge groups. Grouped indicator summaries preserve disagreement
 and uncertainty across applicable sibling endpoints; raw observations remain endpoint-scoped.
 

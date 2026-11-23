@@ -27,6 +27,8 @@ Issue #35 adds concise terminal views, qualified device selectors and conservati
 retaining endpoint facts and detailed inspection.
 Issue #38 adds capability-based keyboard/partial/other/unknown classification, qualified internal/external/virtual
 metadata, keyboard-first query/collection defaults and complete diagnostic inventory through `device list --all`.
+Issue #39 separates readable model handles from display names and technical identity, with shared collision-aware
+resolution, qualified aliases and an additive JSON migration path.
 
 ## Goals and boundaries
 

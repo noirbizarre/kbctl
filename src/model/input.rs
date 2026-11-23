@@ -202,6 +202,8 @@ pub(crate) struct GroupDescriptor {
     pub(crate) incarnation: Option<Incarnation>,
     pub(crate) usb: Metadata<UsbIds>,
     pub(crate) serial: Metadata<String>,
+    pub(crate) product: Metadata<String>,
+    pub(crate) model_label: Option<String>,
     pub(crate) identification: Identification,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]

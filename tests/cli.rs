@@ -29,7 +29,9 @@ fn help_exposes_the_read_only_command_groups_and_json_flag() {
         .args(["device", "inspect", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("/dev/input/event0"));
+        .stdout(
+            predicate::str::contains("gmmk-pro").and(predicate::str::contains("/dev/input/event0")),
+        );
     kbctl()
         .args(["indicator", "status", "--help"])
         .assert()

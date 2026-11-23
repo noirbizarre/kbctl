@@ -42,7 +42,9 @@ fn ordinary_listing_is_a_handful_of_lines_without_kernel_capability_dumps() {
     assert!(output.starts_with("NAME"));
     assert!(output.lines().count() <= 5);
     assert!(output.contains("Synthetic keyboard"));
-    assert!(output.contains("usb-"));
+    assert!(output.contains("SELECTOR"));
+    assert!(output.contains("synthetic-keyboard--"));
+    assert!(!output.contains("usb-"));
     assert!(output.contains("/dev/input/event"));
     assert!(!output.contains("/sys/") && !output.contains("Capabilities"));
     insta::assert_snapshot!("concise_device_list", output);
@@ -100,7 +102,7 @@ fn narrow_unicode_output_preserves_copyable_selectors_and_escapes_terminal_contr
     assert!(output.contains("鍵盤"));
     assert!(!output.contains('\u{1b}'));
     for device in &document.human_view.as_ref().unwrap().devices {
-        assert!(output.contains(&device.selector.id));
+        assert!(output.contains(&device.user_selector.id));
     }
     let colored = text(&document, false, 40, true);
     assert!(colored.contains('\u{1b}'));
@@ -117,7 +119,13 @@ fn selecting_a_group_without_indicator_candidates_is_not_off_or_unsupported() {
         &fixture.endpoints[0].capabilities,
     );
     let initial = document(fixture.clone(), Operation::AllDevices);
-    let selector = initial.human_view.unwrap().devices.remove(0).selector.id;
+    let selector = initial
+        .human_view
+        .unwrap()
+        .devices
+        .remove(0)
+        .user_selector
+        .id;
     let output = text(
         &document(
             fixture,
