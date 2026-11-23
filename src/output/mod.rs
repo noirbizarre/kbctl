@@ -112,9 +112,25 @@ impl Document {
         };
         let selected_group = selected.as_ref().map(|s| s.device.group.id);
         let selected_endpoint = selected.as_ref().and_then(|s| s.endpoint);
-        catalog
+        let total_inputs = catalog.devices.len();
+        let keyboard_count = catalog
             .devices
-            .retain(|d| selected_group.is_none_or(|id| d.group.id == id));
+            .iter()
+            .filter(|d| d.class == InputClass::Keyboard)
+            .count();
+        let all_inputs = matches!(operation, Operation::AllDevices);
+        if let (Operation::Indicators { .. }, Some(id)) = (operation, selected_group) {
+            catalog.set_collection_scope(crate::input::classification::CollectionScope::Device(id));
+        }
+        catalog.devices.retain(|d| {
+            if let Some(id) = selected_group {
+                d.group.id == id
+            } else {
+                all_inputs || d.class == InputClass::Keyboard
+            }
+        });
+        let visible: std::collections::BTreeSet<_> =
+            catalog.devices.iter().map(|d| d.group.id).collect();
         let notices: Vec<_> = notices
             .iter()
             .filter(|notice| {
@@ -137,9 +153,7 @@ impl Document {
             .records
             .values()
             .filter_map(|r| match r.as_ref() {
-                StateRecord::InputDevice(group)
-                    if selected_group.is_none_or(|id| group.id == id) =>
-                {
+                StateRecord::InputDevice(group) if visible.contains(&group.id) => {
                     Some(group.as_ref())
                 }
                 _ => None,
@@ -149,9 +163,7 @@ impl Document {
             .records
             .values()
             .filter_map(|r| match r.as_ref() {
-                StateRecord::InputEndpoint(endpoint)
-                    if selected_group.is_none_or(|id| endpoint.device == id) =>
-                {
+                StateRecord::InputEndpoint(endpoint) if visible.contains(&endpoint.device) => {
                     Some(endpoint.as_ref())
                 }
                 _ => None,
@@ -172,6 +184,7 @@ impl Document {
             members.sort_by(|a, b| a["syspath"].as_str().cmp(&b["syspath"].as_str()));
             json!({"id": group.id.to_string(), "syspath": path(&group.descriptor.key.0),
                 "display_name": view.name, "selector": view.selector, "grouping": view.grouping,
+                "classification": {"kind": view.class.name()}, "origin": view.origin.name(), "location": view.location.name(),
                 "usb": metadata(&group.descriptor.usb, |usb| json!({"vendor": usb.vendor, "product": usb.product})),
                 "serial": metadata(&group.descriptor.serial, |s| json!(s)),
                 "identification": match &group.descriptor.identification {
@@ -183,13 +196,12 @@ impl Document {
         devices.sort_by(|a, b| a["syspath"].as_str().cmp(&b["syspath"].as_str()));
         let mut indicators: Vec<_> = snapshot.records.values().filter_map(|record| {
             let StateRecord::Host(host) = record.as_ref() else { return None };
-            let endpoint = endpoints.iter().find(|e| Some(e.id) == host.input);
-            if selected_group.is_some() && endpoint.is_none() { return None; }
+            let endpoint = endpoints.iter().find(|e| Some(e.id) == host.input)?;
             Some(json!({"source_id": host.id.to_string(), "generation": host.generation.to_string(),
                 "scope": {"namespace": host.scope.namespace(), "value": host.scope.value()},
                 "endpoint_id": host.input.map(|id| id.to_string()),
-                "syspath": endpoint.map(|e| path(&e.descriptor.key.0)),
-                "devnode": endpoint.map(|e| metadata(&e.descriptor.devnode, |p| json!(path(p)))),
+                "syspath": path(&endpoint.descriptor.key.0),
+                "devnode": metadata(&endpoint.descriptor.devnode, |p| json!(path(p))),
                 "availability": match host.availability {
                     SourceAvailability::Active => json!({"state": "active"}),
                     SourceAvailability::Unavailable(cause) => json!({"state": "unavailable", "cause": failure(cause)}),
@@ -199,13 +211,14 @@ impl Document {
         indicators.sort_by(|a, b| a["syspath"].as_str().cmp(&b["syspath"].as_str()));
         let grouped: Vec<_> = catalog.devices.iter().filter(|d| d.has_indicators() || selected_group.is_some()).map(|d| json!({
             "device_id": d.group.id.to_string(), "display_name": d.name, "selector": d.selector, "grouping": d.grouping,
-            "endpoint_ids": d.endpoints.iter().filter(|e| e.eligible || e.host.is_some()).map(|e| e.endpoint.id.to_string()).collect::<Vec<_>>(),
+            "classification": {"kind": d.class.name()}, "origin": d.origin.name(), "location": d.location.name(),
+            "endpoint_ids": d.endpoints.iter().filter(|e| e.applicable || e.host.is_some()).map(|e| e.endpoint.id.to_string()).collect::<Vec<_>>(),
             "locks": {"caps_lock": d.lock(HostLock::Caps), "num_lock": d.lock(HostLock::Num), "scroll_lock": d.lock(HostLock::Scroll)}
         })).collect();
         let indicator_data = json!({"scope": "per_endpoint_kernel_state", "sources": indicators, "devices": grouped,
             "collection": if indicators.is_empty() { "no_sources" } else { "observed" }});
-        let data = match operation {
-            Operation::Devices => {
+        let mut data = match operation {
+            Operation::Devices | Operation::AllDevices => {
                 json!({"discovery": discovery, "devices": devices, "problems": notices})
             }
             Operation::Inspect(_) => {
@@ -223,6 +236,10 @@ impl Document {
                 "problems": notices})
             }
         };
+        data.as_object_mut().expect("command data is an object").insert("inventory".into(), json!({
+            "scope": if selected_group.is_some() { "selected_device" } else if all_inputs { "all_inputs" } else { "keyboards" },
+            "total_input_groups": total_inputs, "recognized_keyboards": keyboard_count, "shown_groups": catalog.devices.len(),
+        }));
         Ok(Self {
             human_view: Some(human::View {
                 devices: catalog.devices,
@@ -230,6 +247,9 @@ impl Document {
                 notices,
                 selected_endpoint,
                 selected: selected_group.is_some(),
+                total_inputs,
+                all_inputs,
+                keyboard_count,
             }),
             schema_version: 1,
             command: operation.name(),
@@ -280,16 +300,25 @@ fn discovery(status: &DiscoveryStatus) -> Value {
 }
 fn endpoint(endpoint: &InputEndpoint) -> Value {
     let d = &endpoint.descriptor;
+    let legacy = if d.classification.kind == InputClass::Unknown {
+        json!({"state": "unknown"})
+    } else {
+        json!({"state": "known", "value": d.classification.kind == InputClass::Keyboard, "evidence": "key_bitmap"})
+    };
     json!({"id": endpoint.id.to_string(), "syspath": path(&d.key.0), "group_confirmed": d.group_confirmed,
         "devnode": metadata(&d.devnode, |p| json!(path(p))), "name": metadata(&d.name, |s| json!(s)),
         "physical_path": metadata(&d.physical_path, |s| json!(s)), "unique_name": metadata(&d.unique_name, |s| json!(s)),
         "identity": {"bus": metadata(&d.identity.bus, |v| json!(v)), "vendor": metadata(&d.identity.vendor, |v| json!(v)),
             "product": metadata(&d.identity.product, |v| json!(v)), "version": metadata(&d.identity.version, |v| json!(v))},
-        "keyboard": match d.keyboard {
-            KeyboardClassification::Unknown => json!({"state": "unknown"}),
-            KeyboardClassification::Known { keyboard, evidence } => json!({"state": "known", "value": keyboard,
-                "evidence": match evidence { ClassificationEvidence::Udev => "udev", ClassificationEvidence::KeyBitmap => "key_bitmap" }}),
-        }, "classification_property": metadata(&d.classification_property, |v| json!(v)), "stream_access": "not_checked",
+        "keyboard": legacy,
+        "classification": {"kind": d.classification.kind.name(), "reason": d.classification.reason.name(),
+            "confidence": if d.classification.kind == InputClass::Unknown { "insufficient" } else { "capability_evidence" },
+            "typing_coverage": d.classification.coverage.map(|c| json!({"letters": c.letters, "digits": c.digits, "editing": c.editing, "modifiers": c.modifiers}))},
+        "classification_property": metadata(d.input_properties.get("ID_INPUT_KEYBOARD").unwrap_or(&Metadata::Missing), |v| json!(v)),
+        "input_properties": d.input_properties.iter().map(|(key, value)| ((*key).to_owned(), metadata(value, |v| json!(v)))).collect::<serde_json::Map<_, _>>(),
+        "placement": {"origin": d.placement.origin.name(), "location": d.placement.location.name(), "reason": d.placement.reason,
+            "evidence": d.placement.facts.iter().map(|fact| json!({"path": path(&fact.path), "metadata": metadata(&fact.value, |v| json!(v))})).collect::<Vec<_>>()},
+        "stream_access": "not_checked",
         "capabilities": {"events": metadata(&d.capabilities.events, |v| json!(v)),
             "codes": d.capabilities.codes.iter().map(|(event, codes)| (event.to_string(), metadata(codes, |v| json!(v)))).collect::<serde_json::Map<_, _>>(),
             "properties": metadata(&d.capabilities.properties, |v| json!(v))}})

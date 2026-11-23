@@ -3,7 +3,7 @@
 use crate::{
     model::{
         identity::InputEndpointId,
-        input::{InputEndpoint, KeyboardClassification, Metadata},
+        input::InputEndpoint,
         observation::{HostLock, NamespacedId},
         state::{CommitOutcome, HostPatch, HostUnavailable, HostValue, StateError},
     },
@@ -217,6 +217,8 @@ pub(crate) struct Service<O: Opener> {
     generation: u64,
     last_step: Instant,
     stopping: bool,
+    scope: crate::input::classification::CollectionScope,
+    pending_admission: bool,
 }
 pub(crate) struct Outcome {
     pub(crate) publications: Vec<CommitOutcome>,
@@ -233,7 +235,12 @@ impl<O: Opener> Service<O> {
             generation: 0,
             last_step: now,
             stopping: false,
+            scope: crate::input::classification::CollectionScope::Keyboards,
+            pending_admission: false,
         })
+    }
+    pub(crate) fn set_scope(&mut self, scope: crate::input::classification::CollectionScope) {
+        self.scope = scope;
     }
     pub(crate) fn leases(&self) -> impl Iterator<Item = (InputEndpointId, u64, &O::Lease)> {
         self.entries.iter().filter_map(|(id, e)| {
@@ -249,6 +256,10 @@ impl<O: Opener> Service<O> {
             .map(|entry| (entry.handle, entry.lease.as_ref().map(Lease::mode)))
     }
     pub(crate) fn next_deadline(&self) -> Option<Instant> {
+        // Re-admission after budgeted retirement must not wait for the next unrelated discovery scan.
+        if self.pending_admission {
+            return Some(self.last_step);
+        }
         self.entries
             .values()
             .map(|entry| {
@@ -295,17 +306,27 @@ impl<O: Opener> Service<O> {
             .input_endpoints()
             .map(|e| (e.id, e.clone()))
             .collect();
+        let admissions = crate::input::classification::admissions(current.values(), self.scope);
         for (id, entry) in &mut self.entries {
             if let Some(endpoint) = current.get(id) {
                 entry.endpoint = endpoint.clone();
-            } else {
+            }
+            let keep = matches!(
+                admissions.get(id),
+                Some(crate::input::classification::Admission::Allow)
+            ) || (matches!(
+                admissions.get(id),
+                Some(crate::input::classification::Admission::Uncertain)
+            ) && entry.lease.is_some());
+            if !keep {
+                // A definite reclassification revokes admission even when the same input ID remains live.
                 entry.retiring = true;
                 entry.pending = None;
                 entry.lease = None;
             }
         }
         for (id, endpoint) in current {
-            if candidate(&endpoint) {
+            if admissions[&id] == crate::input::classification::Admission::Allow {
                 self.entries.entry(id).or_insert(Entry {
                     endpoint,
                     handle: None,
@@ -382,6 +403,10 @@ impl<O: Opener> Service<O> {
                 (self.cursor + if visited == ids.len() { 1 } else { visited }) % ids.len();
         }
         self.last_step = runtime.now();
+        self.pending_admission = admissions.iter().any(|(id, admission)| {
+            *admission == crate::input::classification::Admission::Allow
+                && !self.entries.contains_key(id)
+        });
         Ok(outcome)
     }
     fn process(
@@ -592,6 +617,7 @@ impl<O: Opener> Service<O> {
     }
     pub(crate) fn stop(&mut self, runtime: &mut Runtime) -> Result<Outcome, Error> {
         self.stopping = true;
+        self.pending_admission = false;
         for e in self.entries.values_mut() {
             e.retiring = true;
             e.pending = None;
@@ -614,18 +640,5 @@ impl<O: Opener> Service<O> {
         Ok(out)
     }
 }
-pub(crate) fn candidate(endpoint: &InputEndpoint) -> bool {
-    matches!(
-        endpoint.descriptor.keyboard,
-        KeyboardClassification::Known { keyboard: true, .. }
-    ) || endpoint
-        .descriptor
-        .capabilities
-        .codes
-        .get(&17)
-        .and_then(Metadata::known)
-        .is_some_and(|codes| [0, 1, 2].iter().any(|code| codes.contains(code)))
-}
-
 #[cfg(test)]
 mod tests;

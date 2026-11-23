@@ -76,17 +76,120 @@ pub(crate) struct Capabilities {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ClassificationEvidence {
-    Udev,
-    KeyBitmap,
+pub(crate) enum InputClass {
+    Keyboard,
+    Partial,
+    Other,
+    Unknown,
+}
+impl InputClass {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Keyboard => "keyboard",
+            Self::Partial => "partial_keyboard",
+            Self::Other => "other",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ClassificationReason {
+    TypingProfile,
+    TypingSubset,
+    NonKeyboardRole,
+    NoTypingKeys,
+    MissingCapabilities,
+    ConflictingMetadata,
+}
+impl ClassificationReason {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::TypingProfile => "typing_profile",
+            Self::TypingSubset => "typing_subset",
+            Self::NonKeyboardRole => "non_keyboard_role",
+            Self::NoTypingKeys => "no_typing_keys",
+            Self::MissingCapabilities => "missing_capabilities",
+            Self::ConflictingMetadata => "conflicting_metadata",
+        }
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct TypingCoverage {
+    pub(crate) letters: usize,
+    pub(crate) digits: usize,
+    pub(crate) editing: usize,
+    pub(crate) modifiers: usize,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum KeyboardClassification {
-    Known {
-        keyboard: bool,
-        evidence: ClassificationEvidence,
-    },
+pub(crate) struct InputClassification {
+    pub(crate) kind: InputClass,
+    pub(crate) reason: ClassificationReason,
+    pub(crate) coverage: Option<TypingCoverage>,
+}
+pub(crate) type InputProperties = BTreeMap<&'static str, Metadata<String>>;
+pub(crate) const INPUT_PROPERTIES: &[&str] = &[
+    "ID_INPUT_KEYBOARD",
+    "ID_INPUT_KEY",
+    "ID_INPUT_MOUSE",
+    "ID_INPUT_TOUCHPAD",
+    "ID_INPUT_TOUCHSCREEN",
+    "ID_INPUT_TABLET",
+    "ID_INPUT_JOYSTICK",
+    "ID_INPUT_SWITCH",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InputOrigin {
+    Physical,
+    Virtual,
     Unknown,
+}
+impl InputOrigin {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Physical => "physical",
+            Self::Virtual => "virtual",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InputLocation {
+    Internal,
+    External,
+    Unknown,
+}
+impl InputLocation {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Internal => "internal",
+            Self::External => "external",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlacementFact {
+    pub(crate) path: PathBuf,
+    pub(crate) value: Metadata<String>,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Placement {
+    pub(crate) origin: InputOrigin,
+    pub(crate) location: InputLocation,
+    pub(crate) reason: &'static str,
+    pub(crate) facts: Vec<PlacementFact>,
+}
+impl Default for Placement {
+    fn default() -> Self {
+        Self {
+            origin: InputOrigin::Unknown,
+            location: InputLocation::Unknown,
+            reason: "insufficient_placement_evidence",
+            facts: vec![],
+        }
+    }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StreamAccess {
@@ -113,8 +216,9 @@ pub(crate) struct EndpointDescriptor {
     pub(crate) unique_name: Metadata<String>,
     pub(crate) identity: InputIdentity,
     pub(crate) capabilities: Capabilities,
-    pub(crate) keyboard: KeyboardClassification,
-    pub(crate) classification_property: Metadata<String>,
+    pub(crate) classification: InputClassification,
+    pub(crate) input_properties: InputProperties,
+    pub(crate) placement: Placement,
     pub(crate) stream_access: StreamAccess,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]

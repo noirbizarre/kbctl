@@ -153,8 +153,8 @@ impl FakeHost {
     }
 }
 impl Host for FakeHost {
-    fn initialize(&mut self) -> Result<()> {
-        self.app.initialize()
+    fn initialize(&mut self, operation: &Operation) -> Result<()> {
+        self.app.initialize(operation)
     }
     fn reader(&self) -> StateReader {
         self.app.runtime.reader()
@@ -296,13 +296,21 @@ fn empty_discovery_is_distinct_from_a_permission_failed_inventory() {
 #[test]
 fn unknown_metadata_and_non_keyboard_groups_remain_visible() {
     let mut fixture = many(2);
-    fixture.endpoints[0].keyboard = KeyboardClassification::Unknown;
+    fixture.endpoints[0].capabilities.events = Metadata::Missing;
+    fixture.endpoints[0].classification = crate::input::classification::classify(
+        &InputProperties::new(),
+        &fixture.endpoints[0].capabilities,
+    );
     fixture.endpoints[0].name = Metadata::Failed(failure());
-    fixture.endpoints[1].keyboard = KeyboardClassification::Known {
-        keyboard: false,
-        evidence: ClassificationEvidence::Udev,
-    };
-    let documents = FakeHost::new(fixture, false).run(&Operation::Devices);
+    fixture.endpoints[1]
+        .capabilities
+        .codes
+        .insert(1, Metadata::Known([116].into()));
+    fixture.endpoints[1].classification = crate::input::classification::classify(
+        &InputProperties::new(),
+        &fixture.endpoints[1].capabilities,
+    );
+    let documents = FakeHost::new(fixture, false).run(&Operation::AllDevices);
     let endpoints = &data(&documents[0])["devices"][0]["endpoints"];
     assert_eq!(endpoints[0]["keyboard"]["state"], "unknown");
     assert_eq!(endpoints[0]["name"]["problem"]["kind"], "permission_denied");
@@ -533,7 +541,7 @@ fn canonical_selection_is_shared_by_inspection_and_both_indicator_output_formats
 fn agreeing_siblings_have_one_device_value_but_a_missing_candidate_prevents_unanimity() {
     let mut host = FakeHost::new(many(2), true);
     host.access.borrow_mut().uniform = Some(true);
-    host.initialize().unwrap();
+    host.initialize(&Operation::Status).unwrap();
     let mut snapshot = host.reader().snapshot().unwrap();
     let document = Document::view(
         &Operation::Indicators { device: None },
@@ -629,6 +637,189 @@ fn selected_device_diagnostics_keep_sysfs_fallbacks_when_event_metadata_is_missi
     assert!(problems.iter().any(|p| p["path"] == "/dev/input/event1"));
 }
 
+#[test]
+fn everyday_commands_show_typing_keyboards_while_all_and_inspect_retain_every_input() {
+    let fixture = crate::test_support::input::inventory();
+    let listed = FakeHost::new(fixture.clone(), false).run(&Operation::Devices);
+    let value = data(&listed[0]);
+    assert_eq!(value["inventory"]["total_input_groups"], 13);
+    assert_eq!(value["inventory"]["recognized_keyboards"], 4);
+    assert_eq!(value["devices"].as_array().unwrap().len(), 4);
+    let names: Vec<_> = value["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["display_name"].as_str().unwrap())
+        .collect();
+    for name in [
+        "GMMK Pro",
+        "Dygma Defy",
+        "AT Translated Set 2 keyboard",
+        "Virtual typing",
+    ] {
+        assert!(names.contains(&name));
+    }
+    assert_eq!(
+        value["devices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["display_name"] == "AT Translated Set 2 keyboard")
+            .unwrap()["location"],
+        "internal"
+    );
+    assert_eq!(
+        value["devices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["display_name"] == "Virtual typing")
+            .unwrap()["origin"],
+        "virtual"
+    );
+    let all = FakeHost::new(fixture.clone(), false).run(&Operation::AllDevices);
+    let inputs = data(&all[0])["devices"].as_array().unwrap();
+    assert_eq!(inputs.len(), 13);
+    for name in [
+        "Power Button",
+        "Lid Switch",
+        "Video Bus",
+        "Audio controls",
+        "Virtual controls",
+        "Mouse",
+    ] {
+        let device = inputs.iter().find(|d| d["display_name"] == name).unwrap();
+        assert_eq!(device["classification"]["kind"], "other");
+        let selector = device["selector"]["id"].as_str().unwrap();
+        let inspected =
+            FakeHost::new(fixture.clone(), false).run(&Operation::Inspect(selector.into()));
+        assert_eq!(data(&inspected[0])["device"]["display_name"], name);
+    }
+    for name in ["Numeric keypad", "Macro pad"] {
+        assert_eq!(
+            inputs.iter().find(|d| d["display_name"] == name).unwrap()["classification"]["kind"],
+            "partial_keyboard"
+        );
+    }
+    assert_eq!(
+        inputs
+            .iter()
+            .find(|d| d["display_name"] == "Unreadable input")
+            .unwrap()["classification"]["kind"],
+        "unknown"
+    );
+    let mut host = FakeHost::new(fixture.clone(), true);
+    let status = host.run(&Operation::Indicators { device: None });
+    assert_eq!(host.access.borrow().opens, 6); // Four typing endpoints and two justified LED-reporting siblings.
+    assert_eq!(
+        data(&status[0])["indicators"]["devices"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
+    for name in ["Power Button", "Numeric keypad", "Virtual controls"] {
+        assert!(
+            !data(&status[0])["indicators"]["devices"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d["display_name"] == name)
+        );
+    }
+}
+
+#[test]
+fn explicit_partial_queries_collect_only_the_selected_keypad_and_other_inputs_stay_uncollected() {
+    let fixture = crate::test_support::input::inventory();
+    let all = FakeHost::new(fixture.clone(), false).run(&Operation::AllDevices);
+    let inputs = data(&all[0])["devices"].as_array().unwrap();
+    for (name, expected_opens) in [
+        ("Numeric keypad", 1),
+        ("Macro pad", 1),
+        ("Power Button", 0),
+        ("Unreadable input", 0),
+    ] {
+        let selector = inputs.iter().find(|d| d["display_name"] == name).unwrap()["selector"]["id"]
+            .as_str()
+            .unwrap();
+        let mut host = FakeHost::new(fixture.clone(), true);
+        let output = host.run(&Operation::Indicators {
+            device: Some(selector.into()),
+        });
+        assert_eq!(host.access.borrow().opens, expected_opens);
+        assert_eq!(
+            data(&output[0])["indicators"]["devices"][0]["display_name"],
+            name
+        );
+        if expected_opens == 0 {
+            assert_eq!(
+                data(&output[0])["indicators"]["devices"][0]["locks"]["caps_lock"]["state"],
+                "not_collected"
+            );
+        }
+    }
+}
+
+#[test]
+fn hidden_input_identity_still_participates_in_selector_ambiguity() {
+    let mut fixture = crate::test_support::input::devices();
+    fixture.groups[1].serial = fixture.groups[0].serial.clone();
+    let hidden = fixture.groups[1].key.clone();
+    for endpoint in fixture.endpoints.iter_mut().filter(|e| e.group == hidden) {
+        endpoint
+            .capabilities
+            .codes
+            .insert(1, Metadata::Known([116].into()));
+    }
+    let listing = FakeHost::new(fixture.clone(), false).run(&Operation::Devices);
+    let devices = data(&listing[0])["devices"].as_array().unwrap();
+    assert_eq!(devices.len(), 1);
+    assert_eq!(devices[0]["selector"]["ambiguous"], true);
+    let selector = devices[0]["selector"]["id"].as_str().unwrap();
+    let mut host = FakeHost::new(fixture, true);
+    let error = execute(
+        &mut host,
+        &Operation::Indicators {
+            device: Some(selector.into()),
+        },
+        |_| Ok(()),
+    )
+    .unwrap_err();
+    assert!(matches!(error, Error::Selection { matches: 2, .. }));
+    assert_eq!(host.access.borrow().opens, 0);
+}
+
+#[test]
+fn an_uncertain_sibling_is_not_opened_but_prevents_a_false_unanimous_indicator_value() {
+    let mut fixture = many(2);
+    fixture.endpoints[1]
+        .capabilities
+        .codes
+        .insert(1, Metadata::Failed(crate::test_support::input::failure()));
+    fixture.problems.push(crate::test_support::input::failure());
+    let mut host = FakeHost::new(fixture, true);
+    let documents = host.run(&Operation::Indicators { device: None });
+    assert_eq!(host.access.borrow().opens, 1);
+    let summary = &data(&documents[0])["indicators"]["devices"][0]["locks"]["caps_lock"];
+    assert_eq!(summary["state"], "mixed");
+    assert!(summary["value"].is_null());
+    assert!(
+        summary["contributing"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|o| o["state"] == "not_collected")
+    );
+    assert_eq!(
+        data(&documents[0])["indicators"]["devices"][0]["endpoint_ids"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn ownership_contention_never_admits_a_second_opener_and_cleanup_releases_the_guard() {
@@ -639,7 +830,7 @@ fn ownership_contention_never_admits_a_second_opener_and_cleanup_releases_the_gu
     let mut host = FakeHost::new(scan(), true);
     host.access.borrow_mut().owner =
         Some(Arc::new(OwnerGuard::for_test(directory.path()).unwrap()));
-    host.initialize().unwrap();
+    host.initialize(&Operation::Status).unwrap();
     assert!(matches!(
         OwnerGuard::for_test(directory.path()),
         Err(OwnershipError::Busy(_))

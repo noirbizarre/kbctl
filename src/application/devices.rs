@@ -1,7 +1,7 @@
 //! Snapshot queries and evidence-qualified CLI identities, never hardware pairing authority.
 use crate::{
     error::{Error, Result},
-    indicators,
+    input::classification::{self, Admission, CollectionScope},
     model::{
         identity::{Identification, InputEndpointId},
         input::*,
@@ -116,7 +116,8 @@ impl LockSummary {
 pub(crate) struct EndpointView {
     pub(crate) endpoint: InputEndpoint,
     pub(crate) host: Option<HostState>,
-    pub(crate) eligible: bool,
+    // Uncertain candidates contribute missing knowledge, even though collection cannot open them anew.
+    pub(crate) applicable: bool,
 }
 impl EndpointView {
     pub(crate) fn observation(&self, lock: HostLock) -> LockObservation {
@@ -184,6 +185,9 @@ pub(crate) struct DeviceView {
     pub(crate) name: String,
     pub(crate) selector: Selector,
     pub(crate) grouping: &'static str,
+    pub(crate) class: InputClass,
+    pub(crate) origin: InputOrigin,
+    pub(crate) location: InputLocation,
     pub(crate) endpoints: Vec<EndpointView>,
 }
 impl DeviceView {
@@ -191,14 +195,14 @@ impl DeviceView {
         LockSummary::aggregate(
             self.endpoints
                 .iter()
-                .filter(|e| e.eligible || e.host.is_some())
+                .filter(|e| e.applicable || e.host.is_some())
                 .map(|e| e.observation(lock)),
         )
     }
     pub(crate) fn has_indicators(&self) -> bool {
         self.endpoints
             .iter()
-            .any(|e| e.eligible || e.host.is_some())
+            .any(|e| e.applicable || e.host.is_some())
     }
 }
 
@@ -215,6 +219,13 @@ impl Catalog {
         Self::with_digest(snapshot, digest)
     }
     fn with_digest(snapshot: &Snapshot, hash: impl Fn(&[u8]) -> String) -> Self {
+        let admissions = classification::admissions(
+            snapshot.records.values().filter_map(|r| match r.as_ref() {
+                StateRecord::InputEndpoint(endpoint) => Some(endpoint.as_ref()),
+                _ => None,
+            }),
+            CollectionScope::Keyboards,
+        );
         let mut devices = vec![];
         for record in snapshot.records.values() {
             let StateRecord::InputDevice(group) = record.as_ref() else {
@@ -234,29 +245,28 @@ impl Catalog {
                         Some(EndpointView {
                             endpoint: endpoint.as_ref().clone(),
                             host,
-                            eligible: indicators::candidate(endpoint),
+                            applicable: admissions[&endpoint.id] != Admission::Deny,
                         })
                     }
                     _ => None,
                 })
                 .collect();
             endpoints.sort_by(|a, b| a.endpoint.descriptor.key.cmp(&b.endpoint.descriptor.key));
-            let name = endpoints
-                .iter()
-                .filter(|e| {
-                    matches!(
-                        e.endpoint.descriptor.keyboard,
-                        KeyboardClassification::Known { keyboard: true, .. }
-                    )
-                })
-                .chain(endpoints.iter())
-                .filter_map(|e| e.endpoint.descriptor.name.known())
-                .find(|name| !name.trim().is_empty())
-                .cloned()
-                .unwrap_or_else(|| match &group.descriptor.identification {
-                    Identification::Identified(model) => model.clone(),
-                    _ => "Input device".into(),
-                });
+            let name =
+                endpoints
+                    .iter()
+                    .filter(|e| e.endpoint.descriptor.classification.kind == InputClass::Keyboard)
+                    .chain(endpoints.iter().filter(|e| {
+                        e.endpoint.descriptor.classification.kind == InputClass::Partial
+                    }))
+                    .chain(endpoints.iter())
+                    .filter_map(|e| e.endpoint.descriptor.name.known())
+                    .find(|name| !name.trim().is_empty())
+                    .cloned()
+                    .unwrap_or_else(|| match &group.descriptor.identification {
+                        Identification::Identified(model) => model.clone(),
+                        _ => "Input device".into(),
+                    });
             let grouping = if endpoints
                 .iter()
                 .any(|e| !e.endpoint.descriptor.group_confirmed)
@@ -267,11 +277,48 @@ impl Catalog {
             } else {
                 "input_attachment"
             };
+            let class =
+                classification::group_class(endpoints.iter().map(|e| &e.endpoint.descriptor));
+            let relevant: Vec<_> = endpoints
+                .iter()
+                .filter(|e| {
+                    matches!(
+                        e.endpoint.descriptor.classification.kind,
+                        InputClass::Keyboard | InputClass::Partial
+                    )
+                })
+                .collect();
+            let placement_endpoints = if relevant.is_empty() {
+                endpoints.iter().collect::<Vec<_>>()
+            } else {
+                relevant
+            };
+            let origin = placement_endpoints
+                .first()
+                .map(|e| e.endpoint.descriptor.placement.origin)
+                .filter(|origin| {
+                    placement_endpoints
+                        .iter()
+                        .all(|e| e.endpoint.descriptor.placement.origin == *origin)
+                })
+                .unwrap_or(InputOrigin::Unknown);
+            let location = placement_endpoints
+                .first()
+                .map(|e| e.endpoint.descriptor.placement.location)
+                .filter(|location| {
+                    placement_endpoints
+                        .iter()
+                        .all(|e| e.endpoint.descriptor.placement.location == *location)
+                })
+                .unwrap_or(InputLocation::Unknown);
             devices.push(DeviceView {
                 group: group.as_ref().clone(),
                 name,
                 selector: selector(group, &hash),
                 grouping,
+                class,
+                origin,
+                location,
                 endpoints,
             });
         }
@@ -294,6 +341,18 @@ impl Catalog {
                 .cmp(&(&b.selector.id, &b.group.descriptor.key))
         });
         Self { devices }
+    }
+
+    pub(crate) fn set_collection_scope(&mut self, scope: CollectionScope) {
+        let admissions = classification::admissions(
+            self.devices
+                .iter()
+                .flat_map(|d| d.endpoints.iter().map(|e| &e.endpoint)),
+            scope,
+        );
+        for endpoint in self.devices.iter_mut().flat_map(|d| &mut d.endpoints) {
+            endpoint.applicable = admissions[&endpoint.endpoint.id] != Admission::Deny;
+        }
     }
 
     pub(crate) fn resolve(&self, query: &Path, allow_paths: bool) -> Result<Selection<'_>> {

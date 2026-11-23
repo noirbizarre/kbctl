@@ -1,9 +1,10 @@
 use super::*;
 use crate::{
-    input::{bitmap, classify},
+    input::{bitmap, classification::classify},
     model::{identity::Identification, topology::UsbIds},
 };
 use std::{collections::BTreeMap, ffi::OsStr, fs, io::Read, os::unix::fs::MetadataExt};
+mod placement;
 
 /// Constraining reads to metadata makes permission/race tests independent of real keyboards and test UID.
 pub(crate) trait Reader {
@@ -11,7 +12,7 @@ pub(crate) trait Reader {
     fn canonicalize(&self, path: &Path) -> io::Result<PathBuf>;
     fn read(&self, path: &Path) -> io::Result<Vec<u8>>;
     fn incarnation(&self, path: &Path) -> io::Result<Incarnation>;
-    fn keyboard_property(&self, path: &Path) -> Metadata<String>;
+    fn input_properties(&self, path: &Path) -> InputProperties;
 }
 pub(crate) struct SystemMetadata;
 impl Reader for SystemMetadata {
@@ -36,23 +37,33 @@ impl Reader for SystemMetadata {
             inode: metadata.ino(),
         })
     }
-    fn keyboard_property(&self, path: &Path) -> Metadata<String> {
-        match udev::Device::from_syspath(path) {
-            Ok(device) => match device.property_value("ID_INPUT_KEYBOARD") {
-                Some(value) => match value.to_str() {
-                    Some("0" | "1") => Metadata::Known(value.to_string_lossy().into_owned()),
-                    _ => Metadata::Failed(invalid(
-                        path,
-                        "decode ID_INPUT_KEYBOARD",
-                        ProblemKind::Malformed,
-                    )),
-                },
-                None => Metadata::Missing,
-            },
-            Err(error) => {
-                Metadata::Failed(problem(path, "read udev classification metadata", &error))
-            }
-        }
+    fn input_properties(&self, path: &Path) -> InputProperties {
+        // A single udev lookup preserves role combinations without querying the same record repeatedly.
+        let device = udev::Device::from_syspath(path);
+        INPUT_PROPERTIES
+            .iter()
+            .map(|&key| {
+                (
+                    key,
+                    match &device {
+                        Ok(device) => match device.property_value(key) {
+                            Some(value) if matches!(value.to_str(), Some("0" | "1")) => {
+                                Metadata::Known(value.to_string_lossy().into_owned())
+                            }
+                            Some(_) => Metadata::Failed(invalid(
+                                path,
+                                &format!("decode {key}"),
+                                ProblemKind::Malformed,
+                            )),
+                            None => Metadata::Missing,
+                        },
+                        Err(error) => {
+                            Metadata::Failed(problem(path, "read udev input role metadata", error))
+                        }
+                    },
+                )
+            })
+            .collect()
     }
 }
 
@@ -235,7 +246,8 @@ impl<R: Reader> Collector<R> {
             .collect(),
             properties: self.bits(&input.join("properties")),
         };
-        let property = self.reader.keyboard_property(&path);
+        let properties = self.reader.input_properties(&path);
+        let placement = self.placement(input, &identity, usb.as_deref());
         let endpoint = EndpointDescriptor {
             key: DiscoveryKey(path.clone()),
             incarnation: Some(before.clone()),
@@ -269,8 +281,9 @@ impl<R: Reader> Collector<R> {
             name: self.text(&input.join("name")),
             physical_path: self.text(&input.join("phys")),
             unique_name: self.text(&input.join("uniq")),
-            keyboard: classify(&property, &capabilities),
-            classification_property: property,
+            classification: classify(&properties, &capabilities),
+            input_properties: properties,
+            placement,
             identity,
             capabilities,
             stream_access: StreamAccess::NotChecked,
@@ -298,9 +311,14 @@ impl<R: Reader> Collector<R> {
             &endpoint.name,
             &endpoint.physical_path,
             &endpoint.unique_name,
-            &endpoint.classification_property,
         ] {
             collect(value, &mut problems);
+        }
+        for value in endpoint.input_properties.values() {
+            collect(value, &mut problems);
+        }
+        for fact in &endpoint.placement.facts {
+            collect(&fact.value, &mut problems);
         }
         for value in [
             &endpoint.identity.bus,

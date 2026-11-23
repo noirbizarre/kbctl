@@ -115,34 +115,22 @@ fn delayed_removal_notifications_only_request_a_scan_of_the_current_instance() {
 #[test]
 fn classification_requires_keyboard_evidence_and_never_infers_current_led_values() {
     let mut caps = scan().endpoints.remove(0).capabilities;
-    assert!(matches!(
-        classify(&Metadata::Missing, &caps),
-        KeyboardClassification::Known {
-            keyboard: true,
-            evidence: ClassificationEvidence::KeyBitmap
-        }
-    ));
+    let classify =
+        |caps: &Capabilities| classification::classify(&InputProperties::new(), caps).kind;
+    assert_eq!(classify(&caps), InputClass::Keyboard);
     caps.codes
         .insert(1, Metadata::Known([113, 114, 115].into()));
-    assert!(matches!(
-        classify(&Metadata::Missing, &caps),
-        KeyboardClassification::Known {
-            keyboard: false,
-            ..
-        }
-    ));
+    assert_eq!(classify(&caps), InputClass::Other);
     caps.codes.insert(1, Metadata::Failed(failure()));
+    assert_eq!(classify(&caps), InputClass::Unknown);
     assert_eq!(
-        classify(&Metadata::Missing, &caps),
-        KeyboardClassification::Unknown
+        classification::classify(
+            &InputProperties::from([("ID_INPUT_KEYBOARD", Metadata::Known("1".into()))]),
+            &caps
+        )
+        .kind,
+        InputClass::Unknown
     );
-    assert!(matches!(
-        classify(&Metadata::Known("1".into()), &caps),
-        KeyboardClassification::Known {
-            keyboard: true,
-            evidence: ClassificationEvidence::Udev
-        }
-    ));
 }
 #[test]
 fn bitmap_word_boundaries_are_explicit_and_malformed_data_is_not_empty() {

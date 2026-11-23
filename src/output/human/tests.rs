@@ -85,7 +85,7 @@ fn empty_and_failed_discovery_have_distinct_human_messages() {
         assert!(output.contains(if degraded {
             "discovery is uncertain"
         } else {
-            "No input devices found."
+            "No keyboards found."
         }));
     }
 }
@@ -110,9 +110,13 @@ fn narrow_unicode_output_preserves_copyable_selectors_and_escapes_terminal_contr
 #[test]
 fn selecting_a_group_without_indicator_candidates_is_not_off_or_unsupported() {
     let mut fixture = scan();
-    fixture.endpoints[0].keyboard = KeyboardClassification::Unknown;
+    fixture.endpoints[0].capabilities.events = Metadata::Missing;
     fixture.endpoints[0].capabilities.codes.clear();
-    let initial = document(fixture.clone(), Operation::Devices);
+    fixture.endpoints[0].classification = crate::input::classification::classify(
+        &InputProperties::new(),
+        &fixture.endpoints[0].capabilities,
+    );
+    let initial = document(fixture.clone(), Operation::AllDevices);
     let selector = initial.human_view.unwrap().devices.remove(0).selector.id;
     let output = text(
         &document(
@@ -127,4 +131,55 @@ fn selecting_a_group_without_indicator_candidates_is_not_off_or_unsupported() {
     );
     assert!(output.contains("not collected"));
     assert!(!output.contains("off") && !output.contains("unsupported"));
+}
+
+#[test]
+fn default_views_hide_non_keyboards_and_all_shows_explicit_classes_and_locations() {
+    let fixture = crate::test_support::input::inventory();
+    let defaults = text(
+        &document(fixture.clone(), Operation::Devices),
+        false,
+        140,
+        false,
+    );
+    for excluded in [
+        "Power Button",
+        "Lid Switch",
+        "Numeric keypad",
+        "Audio controls",
+        "Video Bus",
+        "Virtual controls",
+    ] {
+        assert!(!defaults.contains(excluded));
+    }
+    assert!(defaults.contains("[virtual]"));
+    assert!(defaults.contains("[internal]"));
+    assert!(defaults.contains("[external]"));
+    let all = text(&document(fixture, Operation::AllDevices), false, 100, false);
+    for class in ["keyboard", "partial_keyboard", "other", "unknown"] {
+        assert!(all.contains(&format!("Class: {class}")));
+    }
+    for name in [
+        "Power Button",
+        "Numeric keypad",
+        "Audio controls",
+        "Video Bus",
+    ] {
+        assert!(all.contains(name));
+    }
+}
+
+#[test]
+fn all_input_rows_describe_non_keyboard_controls_without_promoting_them() {
+    let mut fixture = scan();
+    let endpoint = &mut fixture.endpoints[0];
+    endpoint.name = Metadata::Known("Power Button".into());
+    endpoint
+        .capabilities
+        .codes
+        .insert(1, Metadata::Known([116].into()));
+    endpoint.classification =
+        crate::input::classification::classify(&endpoint.input_properties, &endpoint.capabilities);
+    let output = text(&document(fixture, Operation::AllDevices), false, 100, false);
+    insta::assert_snapshot!("all_input_control", output);
 }

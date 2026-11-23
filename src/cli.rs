@@ -42,8 +42,12 @@ pub enum Command {
 
 #[derive(Debug, Subcommand)]
 pub enum DeviceCommand {
-    /// List all discovered input groups and their endpoints.
-    List,
+    /// List recognized typing keyboards, grouped by input attachment.
+    List {
+        /// Include partial keyboards, other input devices and unknown classifications.
+        #[arg(long)]
+        all: bool,
+    },
     /// Inspect a device selector (or a current sysfs/event-node locator).
     #[command(
         after_help = "Use the ID printed by `kbctl device list`.\nExample: kbctl device inspect usb-0123456789abcdef0123456789abcdef\nTransient inspection also accepts /dev/input/event0 or an exact sysfs path."
@@ -55,7 +59,7 @@ pub enum DeviceCommand {
 pub enum IndicatorCommand {
     /// Query device-grouped kernel indicator state; --verbose shows endpoints.
     Status {
-        /// Select the ID printed by `kbctl device list` (attachment fallbacks are transient).
+        /// Select a device-list ID; use `device list --all` to find partial keyboards (fallbacks are transient).
         #[arg(long, value_name = "SELECTOR")]
         device: Option<String>,
     },
@@ -96,5 +100,17 @@ mod tests {
             matches!(args.command, Command::Indicator { command: IndicatorCommand::Status { device: Some(device) } } if device == "usb-0123")
         );
         assert!(Cli::try_parse_from(["kbctl", "indicator", "status", "--device"]).is_err());
+    }
+
+    #[test]
+    fn all_is_an_explicit_device_list_inventory_option() {
+        let args = Cli::try_parse_from(["kbctl", "device", "list", "--all", "--json"]).unwrap();
+        assert!(matches!(
+            args.command,
+            Command::Device {
+                command: DeviceCommand::List { all: true }
+            }
+        ));
+        assert!(Cli::try_parse_from(["kbctl", "indicator", "status", "--all"]).is_err());
     }
 }

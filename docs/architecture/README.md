@@ -25,6 +25,8 @@ Issue #34 adds the [read-only CLI](../cli.md) and shared application operations,
 human and versioned JSON output, and orderly watch shutdown.
 Issue #35 adds concise terminal views, qualified device selectors and conservative attachment-group indicator summaries,
 retaining endpoint facts and detailed inspection.
+Issue #38 adds capability-based keyboard/partial/other/unknown classification, qualified internal/external/virtual
+metadata, keyboard-first query/collection defaults and complete diagnostic inventory through `device list --all`.
 
 ## Goals and boundaries
 

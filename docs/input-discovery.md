@@ -67,10 +67,36 @@ adapter selects 64 for the currently supported x86-64/AArch64 kernel environment
 unsupported capability metadata. Process pointer width or the longest printed token is not a kernel-bitness detector.
 Reads are bounded to 4096 bytes and require the complete sysfs newline terminator.
 
-Exact udev `ID_INPUT_KEYBOARD=1` takes precedence; explicit `0` is negative evidence. Missing/invalid properties fall back
-to supported `EV_KEY` plus the full ordinary `KEY_Q..=KEY_P` row, with bitmap evidence recorded. `EV_KEY` alone includes
-mice/buttons and is insufficient. Unreadable required bitmaps give unknown classification. This conservative heuristic
-can miss specialized keyboards, remotes and keypads; it is not proof of programmability or hardware compatibility.
+`input::classification` defines four classes: typing keyboard, partial keyboard/keypad, other input and unknown. Discovery
+recomputes classification from evidence before publication, rather than trusting a stale cached label. Required positive
+typing evidence is EV_KEY plus all ordinary letter rows (`16..25`, `30..38`, `44..50`), digits (`2..11`), editing keys
+Backspace/Tab/Enter/Space, and Shift/Ctrl/Alt groups (either side). This describes advertised typing capabilities, not the
+number of physical switches: compact/split keyboards can satisfy it without a numpad or function row.
+
+Positive but incomplete typing, numeric-keypad, function or macro-key subsets are partial keyboards. Consumer/system keys
+(power, sleep, brightness, volume, media), switches and pointer/controller buttons do not alone qualify. Positive pointer,
+touch, controller and switch roles prevent their limited shortcut keys from becoming partial typing devices; a complete
+typing bitmap can still describe a combined keyboard/pointer interface. Names and vendor/model tables never decide class.
+
+Relevant ID_INPUT_* roles are retained with individual known/missing/failed status. A keyboard tag alone cannot establish
+typing capability. Missing tags are not negative evidence; explicit contradictory or malformed role metadata and unreadable
+required bitmaps produce unknown classification. Raw capabilities, coverage counts and reasons remain inspectable.
+One typing endpoint establishes its attachment's keyboard classification without relabeling auxiliary endpoints. Partial
+endpoints are never unioned to fabricate typing coverage. Defaults exclude partial/other/unknown groups; `--all` and
+unrestricted inspect retain them. Explicit indicator selection can query a positively classified partial group.
+
+### Origin and physical placement
+
+Origin and location are independent. Canonical virtual ancestry or BUS_VIRTUAL gives virtual origin with unknown physical
+location, even when a virtual interface advertises USB. Non-virtual sysfs device ancestry supplies physical-origin evidence.
+For i8042 ancestry with BUS_I8042, readable DMI chassis types 8, 9, 10, 14, 30, 31 or 32 support qualified internal placement;
+desktop PS/2 bus/name alone does not. USB `removable` evidence is followed through actual device ancestors: any removable
+hop supports external placement; internal placement requires every device hop fixed through a verified USB root. This
+avoids mistaking a fixed child of an external hub for a built-in keyboard. Missing/conflicting/malformed/denied evidence
+stays unknown with its raw facts and diagnostics. No product-name or USB/I2C bus-only location inference is used.
+
+Placement is metadata-derived evidence, not hardware attestation, and never changes grouping or selector identity.
+Tests use synthetic typing and system-control profiles rather than claiming captured-device interoperability.
 
 ## Runtime and hosting contract
 

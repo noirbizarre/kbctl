@@ -43,6 +43,7 @@ Or download a binary for your platform from the
 ```bash
 kbctl --help
 kbctl device list
+kbctl device list --all
 kbctl device inspect usb-15ac7a64ff726c151efde8b1cbf1218e
 kbctl status
 kbctl indicator status
@@ -53,7 +54,11 @@ kbctl --json indicator watch
 
 Use an ID printed by `device list`; the ID above illustrates its format.
 
-On Linux, device commands show compact attachment listings and evidence-qualified selectors. Indicator commands report
+On Linux, device commands show recognized typing keyboards by default, grouped by attachment with evidence-qualified
+selectors. `device list --all` includes keypads, macro pads, other input devices and unknown classifications for diagnostics.
+Internal/external placement is shown when supported by platform evidence; virtual typing keyboards are labeled virtual.
+Partials are excluded from defaults but can be explicitly queried with `indicator status --device <selector>`.
+Indicator commands report
 Caps Lock, Num Lock and Scroll Lock per attachment, explicitly exposing disagreement or unavailable endpoint state.
 Use `--verbose` or `device inspect` for diagnostics. JSON remains complete: colored and pretty on supported terminals,
 compact and uncolored when piped. Watch emits an initial snapshot followed by updates until Ctrl-C.
@@ -63,10 +68,17 @@ See the [CLI guide](docs/cli.md) for selector stability/fallbacks, grouping, det
 
 KBCTL distinguishes two related but different things:
 
-- **Host lock state** is the logical Caps Lock, Num Lock or Scroll Lock state maintained by the operating system. Changing it affects the host and may affect more than one keyboard.
-- **Keyboard LED state** is the physical indicator state reported by, or controllable on, an individual keyboard. It belongs to that device and can differ from the host's logical state.
+- **Host lock state** is the logical Caps Lock, Num Lock or Scroll Lock state maintained by the operating system.
+  Changing it affects the host and may affect more than one keyboard.
+- **Keyboard LED state** is the physical indicator state reported by, or controllable on, an individual keyboard.
+  It belongs to that device and can differ from the host's logical state.
 
-These states often stay synchronized, but they are not interchangeable. A command that changes the host lock state does not necessarily target a particular keyboard's LED, and changing a device LED does not necessarily change the host's logical lock state. KBCTL keeps the two operations separate so scripts and desktop widgets can choose the intended behavior explicitly. Per-device LED control with `get`, `set` and `toggle` is tracked in [issue #36](https://github.com/noirbizarre/kbctl/issues/36); host lock-state control is tracked separately in [issue #13](https://github.com/noirbizarre/kbctl/issues/13).
+These states often stay synchronized, but they are not interchangeable. A command that changes the host lock state does
+not necessarily target a particular keyboard's LED, and changing a device LED does not necessarily change the host's
+logical lock state. KBCTL keeps the two operations separate so scripts and desktop widgets can choose the intended
+behavior explicitly. Per-device LED control with `get`, `set` and `toggle` is tracked in
+[issue #36](https://github.com/noirbizarre/kbctl/issues/36); host lock-state control is tracked separately in
+[issue #13](https://github.com/noirbizarre/kbctl/issues/13).
 
 ## Contributing
 

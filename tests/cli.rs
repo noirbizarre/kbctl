@@ -8,6 +8,13 @@ fn kbctl() -> Command {
 
 #[test]
 fn help_exposes_the_read_only_command_groups_and_json_flag() {
+    kbctl()
+        .args(["device", "list", "--help"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("--all").and(predicate::str::contains("typing keyboards")),
+        );
     kbctl().arg("--help").assert().success().stdout(
         predicate::str::contains("device")
             .and(predicate::str::contains("indicator"))

@@ -440,6 +440,134 @@ fn discovery_uncertainty_does_not_retire_a_still_bound_indicator_source() {
 }
 
 #[test]
+fn definitive_reclassification_closes_pending_work_and_readmission_uses_fresh_generations() {
+    let (mut service, mut runtime, clock, id) = setup(Mode::Events);
+    service.step(clock.time(0), &[], &mut runtime).unwrap();
+    let before = host(&runtime);
+    let obsolete = Ready {
+        endpoint: id,
+        generation: service.entries[&id].generation,
+        closed: true,
+    };
+    let mut changed = scan();
+    changed.endpoints[0]
+        .capabilities
+        .codes
+        .insert(1, crate::model::input::Metadata::Known([116].into()));
+    changed.endpoints[0].classification = crate::input::classification::classify(
+        &changed.endpoints[0].input_properties,
+        &changed.endpoints[0].capabilities,
+    );
+    service.entries.get_mut(&id).unwrap().pending = Some(Receipt {
+        value: sample(false),
+        sequence: 999,
+        received: clock.time(0),
+        until: clock.time(90),
+    });
+    runtime
+        .apply_input_scan(changed, MonitorStatus::Watching, clock.at(1))
+        .unwrap();
+    assert_eq!(runtime.input_endpoints().next().unwrap().id, id);
+    service
+        .step(clock.time(1), &[obsolete], &mut runtime)
+        .unwrap();
+    assert!(service.entries.is_empty());
+    assert!(
+        !runtime
+            .reader()
+            .snapshot()
+            .unwrap()
+            .records
+            .values()
+            .any(|r| matches!(r.as_ref(), StateRecord::Host(_)))
+    );
+    runtime
+        .apply_input_scan(scan(), MonitorStatus::Watching, clock.at(2))
+        .unwrap();
+    service
+        .step(clock.time(2), &[obsolete], &mut runtime)
+        .unwrap();
+    let after = host(&runtime);
+    assert_ne!(after.id, before.id);
+    assert_ne!(service.entries[&id].generation, obsolete.generation);
+    assert_eq!(after.availability, SourceAvailability::Active);
+    assert_eq!(service.opener.opens, 2);
+}
+
+#[test]
+fn missing_classification_preserves_a_live_lease_but_cannot_reopen_it_after_failure() {
+    let (mut service, mut runtime, clock, id) = setup(Mode::Events);
+    service.step(clock.time(0), &[], &mut runtime).unwrap();
+    let before = host(&runtime);
+    let mut changed = scan();
+    changed.endpoints[0].capabilities.codes.insert(
+        1,
+        crate::model::input::Metadata::Failed(crate::test_support::input::failure()),
+    );
+    changed.endpoints[0].classification = crate::input::classification::classify(
+        &changed.endpoints[0].input_properties,
+        &changed.endpoints[0].capabilities,
+    );
+    runtime
+        .apply_input_scan(changed, MonitorStatus::Watching, clock.at(1))
+        .unwrap();
+    service.step(clock.time(1), &[], &mut runtime).unwrap();
+    assert_eq!(host(&runtime), before);
+    let closed = Ready {
+        endpoint: id,
+        generation: service.entries[&id].generation,
+        closed: true,
+    };
+    service.step(clock.at(2), &[closed], &mut runtime).unwrap();
+    service.step(clock.at(3), &[], &mut runtime).unwrap();
+    assert_eq!(service.opener.opens, 1);
+    assert!(service.entries.is_empty());
+}
+
+#[test]
+fn partial_collection_requires_explicit_scope_and_scope_removal_retires_it() {
+    let (mut service, mut runtime, clock, id) = setup(Mode::Snapshots(Fallback::Kernel));
+    let mut partial = scan();
+    partial.endpoints[0]
+        .capabilities
+        .codes
+        .insert(1, crate::model::input::Metadata::Known((71..=83).collect()));
+    partial.endpoints[0].classification = crate::input::classification::classify(
+        &partial.endpoints[0].input_properties,
+        &partial.endpoints[0].capabilities,
+    );
+    runtime
+        .apply_input_scan(partial, MonitorStatus::Watching, clock.time(0))
+        .unwrap();
+    let device = runtime.input_endpoints().next().unwrap().device;
+    service.step(clock.time(0), &[], &mut runtime).unwrap();
+    assert_eq!(service.opener.opens, 0);
+    service.set_scope(crate::input::classification::CollectionScope::Device(
+        device,
+    ));
+    service.step(clock.time(0), &[], &mut runtime).unwrap();
+    assert_eq!(service.opener.opens, 1);
+    assert!(service.entries.contains_key(&id));
+    service.set_scope(crate::input::classification::CollectionScope::Keyboards);
+    service.step(clock.time(0), &[], &mut runtime).unwrap();
+    assert!(service.entries.is_empty());
+}
+
+#[test]
+fn readmission_after_unfinished_retirement_is_immediately_scheduled() {
+    let (mut service, mut runtime, clock, id) = setup(Mode::Events);
+    service.step(clock.time(0), &[], &mut runtime).unwrap();
+    // Model a retained retirement whose publication was deferred; current positive evidence cannot cancel that boundary.
+    service.entries.get_mut(&id).unwrap().retiring = true;
+    service.step(clock.time(0), &[], &mut runtime).unwrap();
+    assert!(service.entries.is_empty());
+    assert_eq!(service.next_deadline(), Some(clock.time(0)));
+    service.step(clock.time(0), &[], &mut runtime).unwrap();
+    assert_eq!(service.opener.opens, 2);
+    assert!(service.entries.contains_key(&id));
+}
+
+#[test]
 fn a_hot_first_endpoint_cannot_monopolize_the_global_notification_budget() {
     let (mut service, mut runtime, clock, _) = setup(Mode::Events);
     let mut two = scan();

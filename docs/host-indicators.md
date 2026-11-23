@@ -103,9 +103,18 @@ budget is pending work, not overflow or proof that the queue is idle.
 ## Hosting and scheduling contract
 
 The portable `indicators::Service` owns injected opener/lease objects and per-endpoint lifecycle/publication work. The
-real adapter is `platform::linux::indicators::LinuxOpener`, constructed with `Arc<OwnerGuard>`. Default candidates are
-known keyboard endpoints or endpoints advertising a standard lock LED code. Known keyboards with unreadable metadata
-still receive explicit collection/access outcomes. Unrelated input endpoints are not opened to guess programmability.
+real adapter is `platform::linux::indicators::LinuxOpener`, constructed with `Arc<OwnerGuard>`. Default admission requires
+a positive typing endpoint or a confirmed, non-pointer/controller sibling advertising standard lock LEDs within a
+recognized keyboard attachment. LED support on an unrelated device is insufficient. Partials are excluded by default;
+explicit `indicator status --device` selection can admit a positive partial group and limits collection to that group.
+Selector resolution uses the full inventory before indicator opens; classification and collection eligibility share the
+same domain policy. Known typing keyboards whose indicator interfaces cannot be opened still report actionable outcomes.
+
+Definitive reclassification/scope removal closes leases, discards pending receipts and retires sources even if input IDs
+remain unchanged. Re-admission uses fresh generations and schedules immediate work after deferred retirement. Merely
+missing/denied classification metadata may preserve an already checked live lease, but never admits a new open or reopens
+a failed lease without renewed positive evidence. Unknown groups remain outside default keyboard views. Input-removal
+and checked-open binding rules continue to apply independently.
 
 The direct CLI host (and a future daemon host) starts metadata discovery, acquires ownership and calls indicator `step`.
 It registers event-mode FDs from `service.leases()` and `lease.registration()`, associating each with its endpoint and

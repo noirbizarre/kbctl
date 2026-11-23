@@ -78,8 +78,8 @@ impl LinuxHost {
     }
 }
 impl Host for LinuxHost {
-    fn initialize(&mut self) -> Result<()> {
-        self.application.initialize()
+    fn initialize(&mut self, operation: &Operation) -> Result<()> {
+        self.application.initialize(operation)
     }
     fn reader(&self) -> StateReader {
         self.application.runtime.reader()

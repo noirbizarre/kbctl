@@ -8,6 +8,7 @@ diagnostic. Management protocol backends and D-Bus integration are separate work
 
 ```sh
 kbctl device list
+kbctl device list --all
 kbctl device inspect usb-15ac7a64ff726c151efde8b1cbf1218e
 kbctl indicator status
 kbctl indicator status --device usb-15ac7a64ff726c151efde8b1cbf1218e
@@ -21,8 +22,10 @@ kbctl indicator watch --json
 The example selector is synthetic; copy an ID actually printed by `device list`.
 
 `device list` shows a compact NAME / ID / PATH table, grouping sibling endpoints rather than repeating kernel nodes.
-The path is a current locator; `(+N)` counts additional endpoints. Non-keyboard groups and unknown classifications remain
-visible. Narrow terminals use stacked rows, keeping selectors complete for copying. For example:
+The path is a current locator; `(+N)` counts additional endpoints. Defaults include positively recognized typing keyboards,
+including virtual typing keyboards, and hide partial/other/unknown devices. `device list --all` shows every input group
+with explicit classification and placement labels; inspect can still address any group. Narrow terminals use stacked
+rows, keeping selectors complete for copying. For example:
 
 ```text
 NAME                ID                                    PATH
@@ -35,6 +38,40 @@ in named sections. It accepts canonical IDs and attachment fallbacks. Exact grou
 paths remain accepted for transient inspection, for example `kbctl device inspect /dev/input/event0`. They are not
 persistent selectors. Human names and process-local runtime IDs are not accepted as selectors; names need not be unique.
 Missing or ambiguous selection is an actionable error rather than selecting the first match.
+
+### Keyboard classification and placement
+
+Classification is deterministic discovery/domain logic, independent of names and vendor lists:
+
+| Class | Evidence and inclusion policy |
+|---|---|
+| `keyboard` | Complete ordinary typing capability profile; included by default |
+| `partial_keyboard` | Positive limited typing, keypad, function or macro-key subset; visible under `--all` and inspect |
+| `other` | Known non-keyboard role or no typing-key evidence; diagnostic inventory only |
+| `unknown` | Missing required capabilities, malformed or contradictory evidence; diagnostic inventory only |
+
+The typing profile requires readable EV_KEY and all three alphabetic rows, number-row digits, Space/Enter/Backspace/Tab,
+and Shift/Ctrl/Alt modifier groups (either side). It does not require a physical full-size layout, numpad, function row
+or LED support. Power/sleep/brightness/volume/media keys and pointer/controller buttons alone do not qualify.
+Udev role tags corroborate the bitmaps; a positive keyboard tag cannot override unreadable or contradictory capabilities.
+Missing tags are not negative evidence. Inspect explains the decision and its coverage counts. See the
+[discovery guide](input-discovery.md#bitmap-abi-and-keyboard-classification) for exact policy and limitations.
+
+One positively recognized typing endpoint establishes a keyboard attachment, preserving media/pointer siblings as their
+own endpoint classes. Separate partial interfaces are not unioned into a fictional complete typing interface. This
+classification does not create management topology or prove that a shared receiver represents one keyboard chassis.
+
+Origin (`physical`, `virtual`, `unknown`) is separate from placement (`internal`, `external`, `unknown`). Virtual ancestry
+or the virtual input bus is labeled virtual even if other metadata advertises USB; physical location remains unknown.
+AT/i8042 ancestry on a portable chassis can support an internal label. USB removability must account for the upstream hub
+chain: a fixed child of a removable dock is external, while an entirely fixed chain to the root supports internal placement.
+USB bus type, an AT product name or missing placement metadata alone never decides built-in/external location.
+
+Default list, indicator status/watch and global status use the recognized-keyboard scope in both human and JSON output.
+Partials are not silently mixed in. Copy their selector from `device list --all` to explicitly query supported observations
+with `indicator status --device <selector>`. Other/unknown selections remain inspectable but report `not collected` for
+indicators. Healthy discovery with zero recognized keyboards is distinct from an empty raw input inventory; use `--all`
+for diagnostic visibility. Filtering never removes discovery records or hides selector collisions with excluded inputs.
 
 ### Selector evidence and persistence
 
@@ -55,8 +92,9 @@ the namespace `kbctl/selector/v1/attachment` and one field containing the curren
 in the same way. Runtime IDs, names, event-node paths and enumeration order never enter the advertised selector.
 
 Device commands use metadata only: event-stream access is **not checked** and no indicator node is opened. Indicator
-commands collect from known keyboard endpoints or endpoints advertising standard lock LEDs, following the existing
-collector's candidate policy. Global `status` combines discovery, devices, grouped indicators and an explicit
+commands collect from positive typing endpoints and justified LED-reporting siblings in a confirmed keyboard attachment;
+LED capability alone on an unrelated device is insufficient. Explicit partial selection uses the selected group's scope.
+Global `status` combines discovery, devices, grouped indicators and an explicit
 management summary; it does not start management-backend sessions or claim that device discovery creates logical
 programmable keyboards.
 
@@ -74,8 +112,8 @@ An explicitly selected device without eligible sources reports `not collected`, 
 Groups are the existing discovery attachments, **not verified keyboard chassis**: a USB receiver can expose several
 devices, and unreadable grouping evidence remains uncertain. KBCTL labels this scope and never merges independent
 attachments by names or serials. `--device` on indicator status selects the same canonical/fallback ID shown by device
-discovery, restricting both human and JSON results; current paths and names are not accepted for this option. Collection
-still follows the shared collector's candidate policy and ownership boundary; selection is a result filter.
+discovery, restricting both collection admission and human/JSON results to the selected eligible group; current paths and
+names are not accepted for this option. Selection resolves against the full inventory before any indicator-node open.
 
 Known values, unknown values, unsupported locks, unavailable sources, permission denials, errors and stale observations
 are explicit. Read the lock's `state`, `quality`, source availability, `failure` and `source_failure` alongside `value`.
@@ -96,7 +134,8 @@ SIGTERM or output failure. Snapshot fallback samples periodically and can miss c
 
 Human output uses concise command-specific views, restrained terminal color and explicit state words; diagnostics remain
 understandable without color. `--verbose` adds detail; `RUST_BACKTRACE` expands errors without changing successful output.
-`--json` is global and may appear before or after a subcommand. It always retains full metadata regardless of verbosity.
+`--json` is global and may appear before or after a subcommand. It retains full metadata for the query's visible devices,
+regardless of verbosity. Use `device list --all --json` for the complete raw input inventory.
 JSON rendering uses
 [`console-json`](https://github.com/noirbizarre/console-json); that library owns terminal detection and color policy.
 
@@ -119,13 +158,14 @@ Command data members:
 
 | Command | Data |
 |---|---|
-| `device.list` | `discovery`, `devices`, `problems` |
-| `device.inspect` | `discovery`, `device`, `selected_endpoint_id`, `problems` |
-| `indicator.status`, `indicator.watch` | `discovery`, `indicators`, `problems` |
-| `status` | `execution`, `discovery`, `devices`, `indicators`, `management`, `problems` |
+| `device.list` | `inventory`, `discovery`, `devices`, `problems` |
+| `device.inspect` | `inventory`, `discovery`, `device`, `selected_endpoint_id`, `problems` |
+| `indicator.status`, `indicator.watch` | `inventory`, `discovery`, `indicators`, `problems` |
+| `status` | `inventory`, `execution`, `discovery`, `devices`, `indicators`, `management`, `problems` |
 
-`discovery` separates inventory and monitor health. An empty array with current inventory means no devices were found;
-an empty array with degraded discovery is not evidence of an empty host. `indicators.scope` is
+`inventory` describes query visibility (`keyboards`, `all_inputs` or `selected_device`), total raw input groups, recognized
+keyboard groups and shown groups. An empty default list can coexist with many non-keyboard inputs. `discovery` separates
+inventory and monitor health; degraded discovery is not evidence of an empty host. `indicators.scope` is
 `per_endpoint_kernel_state`; `collection` is `observed` or `no_sources`. An empty source list is interpreted together
 with discovery health. Each source has endpoint locators, scope, availability and three named entries under `locks`:
 `caps_lock`, `num_lock`, `scroll_lock`. Field reports retain provenance, sequence, validity and freshness deadlines.
@@ -136,6 +176,12 @@ Device records additionally include `display_name`, qualified `selector` metadat
 `ambiguous`, `fallback`, `fallback_ambiguous`, `reason`) and `grouping`. `usb_serial` means advertised evidence;
 `attachment` means locator-scoped fallback. `grouping` is `usb_attachment`, `input_attachment` or `uncertain_attachment`,
 never a claim of chassis identity. Existing numeric-string `id` fields remain process-local.
+
+Group records and grouped indicator summaries add `classification.kind`, `origin` and `location`. Endpoint records retain
+the schema-v1 `keyboard` boolean/unknown projection and `classification_property`; richer `classification` provides `kind`,
+`reason`, confidence and `typing_coverage`, while `input_properties` and `placement.evidence` retain raw tagged metadata.
+Placement includes its qualified reason. These additions preserve field shapes and selector derivation; the default query
+scope is now keyboard-first, with the complete previous inventory accessible explicitly through `--all`.
 
 `indicators.devices` adds per-attachment summaries, referencing `device_id` and contributing `endpoint_ids`, plus the same
 name/selector/grouping fields. Each lock has `state`, nullable `value` and distinct `contributing` state/value pairs.

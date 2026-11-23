@@ -29,6 +29,7 @@ pub(crate) mod devices;
 #[derive(Clone, Debug)]
 pub(crate) enum Operation {
     Devices,
+    AllDevices,
     Inspect(PathBuf),
     Indicators { device: Option<String> },
     Watch,
@@ -37,7 +38,7 @@ pub(crate) enum Operation {
 impl Operation {
     pub(crate) fn name(&self) -> &'static str {
         match self {
-            Self::Devices => "device.list",
+            Self::Devices | Self::AllDevices => "device.list",
             Self::Inspect(_) => "device.inspect",
             Self::Indicators { .. } => "indicator.status",
             Self::Watch => "indicator.watch",
@@ -90,8 +91,30 @@ impl<S: Source, O: Opener> Application<S, O> {
         Ok(())
     }
 
-    pub(crate) fn initialize(&mut self) -> Result<()> {
+    pub(crate) fn initialize(&mut self, operation: &Operation) -> Result<()> {
+        // Resolve explicit scope from metadata before any collection; hidden devices still participate in identity ambiguity.
+        let outcome = self.discovery.step(self.runtime.now(), &mut self.runtime)?;
+        let initial_notices: Vec<_> = outcome.problems.iter().map(Notice::discovery).collect();
+        if let Some(service) = &mut self.indicators {
+            let scope = if let Operation::Indicators {
+                device: Some(selector),
+            } = operation
+            {
+                let catalog = devices::Catalog::new(&self.runtime.reader().snapshot()?);
+                crate::input::classification::CollectionScope::Device(
+                    catalog
+                        .resolve(std::path::Path::new(selector), false)?
+                        .device
+                        .group
+                        .id,
+                )
+            } else {
+                crate::input::classification::CollectionScope::Keyboards
+            };
+            service.set_scope(scope);
+        }
         self.step(&[])?;
+        self.notices.extend(initial_notices);
         // One collector turn is budgeted. Cover the whole inventory, without waiting for failed-open retries.
         let rounds = self
             .runtime
@@ -129,7 +152,7 @@ impl<S: Source, O: Opener> Application<S, O> {
 
 /// An execution host owns readiness and cancellation; operations share the same published state boundary.
 pub(crate) trait Host {
-    fn initialize(&mut self) -> Result<()>;
+    fn initialize(&mut self, operation: &Operation) -> Result<()>;
     fn reader(&self) -> StateReader;
     fn notices(&self) -> &[Notice];
     /// False means cancellation; true means work was processed and the reader may have changed.
@@ -153,7 +176,7 @@ fn execute_inner(
     operation: &Operation,
     emit: &mut impl FnMut(&Document) -> Result<()>,
 ) -> Result<()> {
-    host.initialize()?;
+    host.initialize(operation)?;
     let reader = host.reader();
     if !matches!(operation, Operation::Watch) {
         return emit(&Document::view(

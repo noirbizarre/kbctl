@@ -34,8 +34,14 @@ fn main() -> ExitCode {
 
     let operation = match args.command {
         Command::Device {
-            command: DeviceCommand::List,
-        } => Operation::Devices,
+            command: DeviceCommand::List { all },
+        } => {
+            if all {
+                Operation::AllDevices
+            } else {
+                Operation::Devices
+            }
+        }
         Command::Device {
             command: DeviceCommand::Inspect { device },
         } => Operation::Inspect(device),

@@ -10,6 +10,7 @@ use crate::{
 use std::time::{Duration, Instant};
 
 pub(crate) mod bitmap;
+pub(crate) mod classification;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct Drain {
@@ -164,6 +165,11 @@ impl<S: Source> Service<S> {
         // Keep dirty until publication succeeds, including when the runtime rejects its timestamp/reservation.
         self.dirty = true;
         let mut scan = self.source.scan();
+        // All discovery sources obey the same evidence policy; a cached label cannot outlive changed capabilities.
+        for endpoint in &mut scan.endpoints {
+            endpoint.classification =
+                classification::classify(&endpoint.input_properties, &endpoint.capabilities);
+        }
         for group in &mut scan.groups {
             let serial = group
                 .serial
@@ -196,46 +202,6 @@ impl<S: Source> Service<S> {
             publication: Some(publication),
             problems,
         })
-    }
-}
-
-pub(crate) fn classify(
-    property: &Metadata<String>,
-    capabilities: &Capabilities,
-) -> KeyboardClassification {
-    if let Some(value) = property.known() {
-        match value.as_str() {
-            "1" => {
-                return KeyboardClassification::Known {
-                    keyboard: true,
-                    evidence: ClassificationEvidence::Udev,
-                };
-            }
-            "0" => {
-                return KeyboardClassification::Known {
-                    keyboard: false,
-                    evidence: ClassificationEvidence::Udev,
-                };
-            }
-            _ => {}
-        }
-    }
-    let Some(events) = capabilities.events.known() else {
-        return KeyboardClassification::Unknown;
-    };
-    if !events.contains(&1) {
-        return KeyboardClassification::Known {
-            keyboard: false,
-            evidence: ClassificationEvidence::KeyBitmap,
-        };
-    }
-    let Some(keys) = capabilities.codes.get(&1).and_then(Metadata::known) else {
-        return KeyboardClassification::Unknown;
-    };
-    // EV_KEY alone also covers mice/buttons. This conservative ordinary-key row is not a universal keyboard proof.
-    KeyboardClassification::Known {
-        keyboard: (16..=25).all(|key| keys.contains(&key)),
-        evidence: ClassificationEvidence::KeyBitmap,
     }
 }
 

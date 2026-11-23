@@ -1,0 +1,11 @@
+---
+source: src/output/human/tests.rs
+expression: output
+---
+Power Button
+  attachment-641e591b9a9ed791c70a1c81e29a57af
+  Class: other
+  Placement: origin unknown; location unknown
+  Path: /dev/input/event0
+Rows are input attachments, not verified chassis; (+N) counts extra endpoints.
+attachment-* IDs are locator-scoped; reconnect stability is not guaranteed.
