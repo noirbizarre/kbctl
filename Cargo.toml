@@ -83,7 +83,7 @@ clap = { version = "4", features = ["derive", "env", "wrap_help"] }
 console = "0.16"
 console-json = "0.1.1"
 # CLI selectors must have a documented, reproducible digest across compiler/process versions.
-sha2 = "0.10"
+sha2 = "0.11"
 
 # Configuration & serialisation
 serde = { version = "1", features = ["derive"] }
